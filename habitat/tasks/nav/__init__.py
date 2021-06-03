@@ -18,3 +18,15 @@ def _try_register_nav_task():
         class NavigationTaskImportError(EmbodiedTask):
             def __init__(self, *args, **kwargs):
                 raise navtask_import_error
+
+
+def _try_register_spawned_objectnav_task():
+    try:
+        from habitat.tasks.nav.spawned_objectnav import SpawnedObjectNavTask  # noqa
+    except ImportError as e:
+        navtask_import_error = e
+
+        @registry.register_task(name="SpawnedObjectNav-v0")
+        class SpawnedObjectNavTaskImportError(EmbodiedTask):
+            def __init__(self, *args, **kwargs):
+                raise navtask_import_error
