@@ -28,7 +28,7 @@ class SpawnedObjectGoal(NavigationGoal):
     _appearance_cache: Optional[List[VisualObservation]] = attr.ib(init=False, default=None)
 
     def __getstate__(self):
-        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
+        return {k: v for k, v in vars(self).items() if not k.startswith('_')}
 
     def __setstate__(self, state):
         self.__dict__.update(state)
@@ -69,8 +69,8 @@ class SpawnedObjectGoalCategorySensor(Sensor):
         return spaces.Box(low=0, high=self._max_object_category_index,
                           shape=(1,), dtype=np.int64)
 
-    def get_observation(self, episode: SpawnedObjectNavEpisode, *args, **kwargs) -> int:
-        return np.array([episode.object_category_index])
+    def get_observation(self, episode: SpawnedObjectNavEpisode, *args, **kwargs) -> np.ndarray:
+        return np.array([episode.object_category_index], dtype=np.int64)
 
 
 @registry.register_sensor
@@ -93,9 +93,10 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
 
     def _get_observation_space(self, *args: Any, **kwargs: Any) -> Space:
         src_space = self._sim.sensor_suite.observation_spaces.spaces[self._sensor_uuid]
-        obs_space = deepcopy(src_space)
-        obs_space.shape = (self.config.NUM_VIEWS,) + obs_space.shape
-        return obs_space
+        extended_shape = (self.config.NUM_VIEWS,) + src_space.shape
+        return spaces.Box(low=np.broadcast_to(src_space.low, extended_shape),
+                          high=np.broadcast_to(src_space.high, extended_shape),
+                          dtype=src_space.dtype)
 
     def _generate_views_around_goal(self, goal: SpawnedObjectGoal, num_views:int) -> None:
         goal_pos = self.config.OUT_OF_CONTEXT_POS if self.config.OUT_OF_CONTEXT \
@@ -166,12 +167,9 @@ class SpawnedObjectNavTask(NavigationTask):
         self.is_stop_called = False
         super().__init__(config, sim, dataset)
 
-    def reset(self, episode: SpawnedObjectNavEpisode):
-        for obj_id in self._sim.get_existing_object_ids():
-            self._sim.remove_object(obj_id)
-
-        loaded = set(self._loaded_object_templates.keys())
-        to_load = self._dataset.get_objects_to_load()
+    def _reload_templates(self, episode: SpawnedObjectNavEpisode) -> None:
+        loaded = set(self._loaded_object_templates)
+        to_load = self._dataset.get_objects_to_load(episode)
         for tmpl_id in loaded - to_load:
             mngr_id = self._loaded_object_templates[tmpl_id]
             self._template_manager.remove_template_by_ID(mngr_id)
@@ -181,10 +179,20 @@ class SpawnedObjectNavTask(NavigationTask):
             mngr_id, = self._template_manager.load_configs(obj_cfg_path)
             self._loaded_object_templates[tmpl_id] = mngr_id
 
+    def _despawn_objects(self) -> None:
+        for obj_id in self._sim.get_existing_object_ids():
+            self._sim.remove_object(obj_id)
+
+    def _spawn_objects(self, episode: SpawnedObjectNavEpisode) -> None:
         for goal in episode.goals:
             mngr_id = self._loaded_object_templates[goal.object_template_id]
             goal._spawned_object_id = self._sim.add_object(mngr_id)
             self._sim.set_translation(goal.position, goal._spawned_object_id)
             self._sim.set_rotation(mn.Quaternion(goal.orientation[:3], goal.orientation[3]),
                                    goal._spawned_object_id)
+
+    def reset(self, episode: SpawnedObjectNavEpisode) -> Observations:
+        self._despawn_objects()
+        self._reload_templates(episode)
+        self._spawn_objects(episode)
         return super().reset(episode)
