@@ -1,15 +1,12 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Set, Optional
 import os.path
 import json
 
+import habitat
 from habitat.core.registry import registry
-from habitat.datasets.pointnav.pointnav_dataset import PointNavDatasetV1, \
-                                                       DEFAULT_SCENE_PATH_PREFIX
+from habitat.datasets.pointnav.pointnav_dataset import PointNavDatasetV1
+from habitat.datasets.spawned_objectnav.utils import find_scene_file, find_object_config_file
 from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, SpawnedObjectNavEpisode
-
-
-DEFAULT_OBJECT_PATH_PREFIX = "data/object_datasets/"
-DEFAULT_OBJECT_PATH_EXT = ".object_config.json"
 
 
 @registry.register_dataset(name="SpawnedObjectNav-v0")
@@ -19,25 +16,17 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
     @staticmethod
     def _json_hook(raw_dict):
         if "episode_id" in raw_dict:
-            if raw_dict["scene_id"].startswith(DEFAULT_SCENE_PATH_PREFIX):
-                raw_dict["scene_id"] = raw_dict["scene_id"][len(DEFAULT_SCENE_PATH_PREFIX):]
+            raw_dict["scene_id"] = find_scene_file(raw_dict["scene_id"])
             return SpawnedObjectNavEpisode(**raw_dict)
         elif "object_template_id" in raw_dict:
+            obj_tmpl_id = find_object_config_file(raw_dict["object_template_id"])
+            raw_dict["object_template_id"] = obj_tmpl_id
             return SpawnedObjectGoal(**raw_dict)
         else:
             return raw_dict
 
-    @staticmethod
-    def _find_object_config_file(tmpl_id):
-        for prefix in ('.', DEFAULT_OBJECT_PATH_PREFIX):
-            for ext in ('', DEFAULT_OBJECT_PATH_EXT):
-                path = os.path.join(prefix, tmpl_id + ext)
-                if os.path.isfile(path):
-                    return path
-        raise FileNotFoundError("Could not find object config file for '{}'".format(tmpl_id))
-
     def get_objects_to_load(self,
-                            episode: Optional[SpawnedObjectNavEpisode]=None) -> List[str]:
+                            episode: Optional[SpawnedObjectNavEpisode]=None) -> Set[str]:
         if episode is None:
             return {goal.object_template_id for episode in self.episodes
                                             for goal in episode.goals}

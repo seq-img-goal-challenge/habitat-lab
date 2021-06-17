@@ -11,19 +11,12 @@ import numpy as np
 import habitat
 from habitat.core.simulator import Simulator
 from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, SpawnedObjectNavEpisode
-
-
-# objects_dir default tree structure:
-# + data/object_datasets/{dataset_name}/{category}/{object_id}.object_config.json
-# OR
-# + data/object_datasets/{dataset_name}/{category}.object_config.json
-#       if there is a single object model for this category
-
-
-DEFAULT_SCENE_PATH_PREFIX: str = "data/scene_datasets/"
-DEFAULT_SCENE_PATH_EXT: str = ".glb"
-DEFAULT_OBJECT_PATH_PREFIX: str = "data/object_datasets/"
-DEFAULT_OBJECT_PATH_EXT: str = ".object_config.json"
+from habitat.datasets.spawned_objectnav.utils import DEFAULT_SCENE_PATH_PREFIX, \
+                                                     DEFAULT_SCENE_PATH_EXT, \
+                                                     DEFAULT_OBJECT_PATH_PREFIX, \
+                                                     DEFAULT_OBJECT_PATH_EXT, \
+                                                     strip_scene_id, \
+                                                     strip_object_template_id
 
 
 def create_object_pool(objects_dir: str) -> Tuple[Dict[str, Set[str]], Dict[str, int]]:
@@ -39,13 +32,13 @@ def create_object_pool(objects_dir: str) -> Tuple[Dict[str, Set[str]], Dict[str,
                 cat_idx_map[category] = next(cat_idx)
             for sub_entry in os.scandir(entry.path):
                 if sub_entry.is_file() and sub_entry.name.endswith(DEFAULT_OBJECT_PATH_EXT):
-                    tmpl_id = sub_entry.path[:-len(DEFAULT_OBJECT_PATH_EXT)]
+                    tmpl_id = sub_entry.path
                     pool[category].add(tmpl_id)
         elif entry.is_file() and entry.name.endswith(DEFAULT_OBJECT_PATH_EXT):
             category = entry.name[:-len(DEFAULT_OBJECT_PATH_EXT)]
             if category not in cat_idx_map:
                 cat_idx_map[category] = next(cat_idx)
-            tmpl_id = entry.path[:-len(DEFAULT_OBJECT_PATH_EXT)]
+            tmpl_id = entry.path
             pool[category].add(tmpl_id)
     return pool, cat_idx_map
 
@@ -58,6 +51,33 @@ def create_scene_pool(scenes_dir: str) -> Set[str]:
         if entry.is_file() and entry.name.endswith(DEFAULT_SCENE_PATH_EXT):
             pool.add(entry.path)
     return pool
+
+
+def generate_spawned_objectgoal(sim: Simulator,
+                                start_pos: np.ndarray,
+                                tmpl_id: str,
+                                rng: np.random.Generator,
+                                max_goals: int,
+                                goal_radius: float,
+                                rotate_objects: str) -> SpawnedObjectGoal:
+    d = np.inf
+    while not np.isfinite(d):
+        obj_pos = sim.sample_navigable_point()
+        d = sim.geodesic_distance(start_pos, obj_pos)
+    if rotate_objects == "DISABLE":
+        obj_rot = [0.0, 0.0, 0.0, 1.0]
+    elif rotate_objects == "YAXIS":
+        a = 2 * np.pi * rng.random()
+        obj_rot =  [*(np.sin(0.5 * a) * sim.up_vector), np.cos(0.5 * a)]
+    elif rotate_objects == "3D":
+        rot_ax = rng.random((3,))
+        rot_ax /= np.linalg.norm(rot_ax)
+        a = 2 * np.pi * rng.random()
+        obj_rot = [*(np.sin(0.5 * a) * rot_ax), np.cos(0.5 * a)]
+    return SpawnedObjectGoal(position=obj_pos,
+                             orientation=obj_rot,
+                             radius=goal_radius,
+                             object_template_id=strip_object_template_id(tmpl_id))
 
 
 def generate_spawned_objectnav_episode(sim: Simulator,
@@ -75,29 +95,13 @@ def generate_spawned_objectnav_episode(sim: Simulator,
     category, tmpl_ids = rng.choice(list(object_pool.items()))
     cat_index = category_index_map[category]
     if len(tmpl_ids) > max_goals:
-        tmpl_ids = rng.choice(list(tmpl_ids), (max_goals,), replace=True)
-
-    goals = []
-    for tmpl_id in tmpl_ids:
-        d = np.inf
-        while not np.isfinite(d):
-            obj_pos = sim.sample_navigable_point()
-            d = sim.geodesic_distance(start_pos, obj_pos)
-        if rotate_objects == "DISABLE":
-            obj_rot = [0.0, 0.0, 0.0, 1.0]
-        elif rotate_objects == "YAXIS":
-            a = 2 * np.pi * rng.random((len(tmpl_ids),))
-            obj_rot =  [*(np.sin(0.5 * a) * sim.up_vector), np.cos(0.5 * a)]
-        elif rotate_objects == "3D":
-            rot_ax = rng.random((3,))
-            rot_ax /= np.linalg.norm(rot_ax)
-            a = 2 * np.pi * rng.random()
-            obj_rot = [*(np.sin(0.5 * a) * rot_ax), np.cos(0.5 * a)]
-        goals.append(SpawnedObjectGoal(position=obj_pos, orientation=obj_rot,
-                                       radius=goal_radius, object_template_id=tmpl_id))
+        tmpl_ids = rng.choice(list(tmpl_ids), max_goals, replace=True)
+    goals = [generate_spawned_objectgoal(sim, start_pos, tmpl_id, rng,
+                                         max_goals, goal_radius, rotate_objects)
+             for tmpl_id in tmpl_ids]
 
     return SpawnedObjectNavEpisode(episode_id=ep_id,
-                                   scene_id=sim.habitat_config.SCENE,
+                                   scene_id=strip_scene_id(sim.habitat_config.SCENE),
                                    start_position=start_pos,
                                    start_rotation=start_rot,
                                    object_category=category,
