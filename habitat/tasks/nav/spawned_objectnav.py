@@ -175,8 +175,7 @@ class SpawnedObjectNavTask(NavigationTask):
             self._template_manager.remove_template_by_ID(mngr_id)
             del self._loaded_object_templates[tmpl_id]
         for tmpl_id in to_load - loaded:
-            obj_cfg_path = self._dataset._find_object_config_file(tmpl_id)
-            mngr_id, = self._template_manager.load_configs(obj_cfg_path)
+            mngr_id, = self._template_manager.load_configs(tmpl_id)
             self._loaded_object_templates[tmpl_id] = mngr_id
 
     def _despawn_objects(self) -> None:

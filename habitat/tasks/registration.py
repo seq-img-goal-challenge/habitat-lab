@@ -12,6 +12,7 @@ from habitat.tasks.rearrange import _try_register_rearrange_task
 from habitat.tasks.vln import _try_register_vln_task
 from habitat.tasks.nav import _try_register_spawned_objectnav_task
 from habitat.tasks.sequential_nav import _try_register_sequential_nav_task
+from habitat.tasks.sequential_nav import _try_register_sequential_objectnav_task
 
 
 def make_task(id_task, **kwargs):
@@ -30,3 +31,4 @@ _try_register_vln_task()
 _try_register_rearrange_task()
 _try_register_spawned_objectnav_task()
 _try_register_sequential_nav_task()
+_try_register_sequential_objectnav_task()
