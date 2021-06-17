@@ -20,7 +20,7 @@ OBJECTS_DIR = "data/object_datasets/shapenet_core_v2/"
 OBJECTS_EXT = ".object_config.json"
 N_VIEWS = 8
 N_RETRIES = 2
-TIMEOUT=6.0
+TIMEOUT=4.0
 EXCLUDED = {
         #"chair/941720989a7af0248b500dd30d6dfd0", # wrong images location './', FIXED -> '../'
         #"chair/482afdc2ddc5546f764d42eddc669b23", # wrong images location './', FIXED -> '../'
@@ -62,11 +62,15 @@ def worker(conn):
             a = 2 * np.pi * np.random.random()
             pos = obj_pos + [r * np.cos(a), -0.5, r * np.sin(a)]
             rot = [0, np.sin(0.25 * np.pi - 0.5 * a), 0, np.cos(0.225 * np.pi - 0.5 * a)]
-            views.append(sim.get_observations_at(pos, rot)["rgb"][:, :, ::-1])
+            try:
+                views.append(sim.get_observations_at(pos, rot)["rgb"][:, :, ::-1])
+            except MemoryError:
+                break
         views = np.concatenate(views, 1)
         conn.send(views.max() > 0)
         sim.remove_object(obj_id)
         tmpl_mngr.remove_template_by_ID(mngr_id)
+    conn.close()
 
 
 def spawn_worker():
@@ -92,14 +96,14 @@ def main():
                     if short_tmpl_id not in EXCLUDED:
                         conn.send(tmpl_id)
                         for t in range(N_RETRIES):
-                            if mp.connection.wait([conn], TIMEOUT):
+                            try:
                                 visible = conn.recv()
                                 if visible:
                                     viz_count += 1
                                 else:
                                     logf.write(f"{short_tmpl_id}\n")
                                 break
-                            else:
+                            except EOFError:
                                 logging.warning("Simulator died, restarting.")
                                 p.terminate()
                                 conn.close()
