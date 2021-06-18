@@ -35,7 +35,9 @@ EXCLUDED = {
         "chair/c70c1a6a0e795669f51f77a6d7299806", # empty texture path '../'
         "display/b0952767eeb21b88e2b075a80e28c81b", # Files 'texture0.jpg' and 'texture1.jpg' are empty
         "telephone/a4910da0271b6f213a7e932df8806f9e", # File 'texture1.jpg' is empty
+        "telephone/70fe91a7bc072c39cf81faac56233ce6", # cannot open .obj
 }
+LOG_PATH = "validate_shapenet_object_dataset.log"
 
 
 def worker(conn):
@@ -52,20 +54,29 @@ def worker(conn):
         tmpl_id = conn.recv()
         if tmpl_id is None:
             break
-        mngr_id, = tmpl_mngr.load_configs(tmpl_id)
-        obj_id = sim.add_object(mngr_id)
+        try:
+            mngr_id, = tmpl_mngr.load_configs(tmpl_id)
+        except MemoryError:
+            logging.info("Simulator failed to load object config.")
+            break
+        try:
+            obj_id = sim.add_object(mngr_id)
+        except MemoryError:
+            logging.info("Simulator failed to spawn object in scene.")
+            break
         sim.set_translation(obj_pos, obj_id)
 
         views = []
-        for _ in range(N_VIEWS):
-            r = 2 * np.random.random() + 0.8
-            a = 2 * np.pi * np.random.random()
-            pos = obj_pos + [r * np.cos(a), -0.5, r * np.sin(a)]
-            rot = [0, np.sin(0.25 * np.pi - 0.5 * a), 0, np.cos(0.225 * np.pi - 0.5 * a)]
-            try:
+        try:
+            for _ in range(N_VIEWS):
+                r = 2 * np.random.random() + 0.8
+                a = 2 * np.pi * np.random.random()
+                pos = obj_pos + [r * np.cos(a), -0.5, r * np.sin(a)]
+                rot = [0, np.sin(0.25 * np.pi - 0.5 * a), 0, np.cos(0.225 * np.pi - 0.5 * a)]
                 views.append(sim.get_observations_at(pos, rot)["rgb"][:, :, ::-1])
-            except MemoryError:
-                break
+        except MemoryError:
+            logging.info("Simulator failed to generate a view.")
+            break
         views = np.concatenate(views, 1)
         conn.send(views.max() > 0)
         sim.remove_object(obj_id)
@@ -87,7 +98,7 @@ def main():
     pool, _ = create_object_pool(OBJECTS_DIR)
     total_count = sum(len(tmpl_pool) for tmpl_pool in pool.values())
     viz_count = 0
-    with open("validate_shapenet_object_dataset.log", 'wt') as logf:
+    with open(LOG_PATH, 'wt') as logf:
         with tqdm.tqdm(total=total_count) as progress:
             for cat, tmpl_pool in pool.items():
                 for tmpl_id in tmpl_pool:
@@ -103,14 +114,14 @@ def main():
                                 else:
                                     logf.write(f"{short_tmpl_id}\n")
                                 break
-                            except EOFError:
+                            except (EOFError, ConnectionResetError):
                                 logging.warning("Simulator died, restarting.")
                                 p.terminate()
                                 conn.close()
                                 p, conn = spawn_worker()
                                 conn.send(tmpl_id)
                         else:
-                            logging.warning("Simulator keeps dying, skipping this model...")
+                            logging.warning("Simulator keeps dying, skipping this model.")
                     viz_rate = viz_count / (progress.n + 1)
                     progress.set_postfix_str(f"{viz_rate:.1%} visible")
                     progress.update()
