@@ -89,17 +89,19 @@ class DistanceToNextGoal(Measure):
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
         return self.cls_uuid
 
-    def reset_metric(self, *args: Any, **kwargs: Any) -> None:
-        self._last_pos = None
-        self._metric = np.inf
-
-    def update_metric(self, *args: Any, episode: SequentialEpisode,
-                      task: SequentialNavigationTask, **kwargs: Any) -> None:
-        pos = np.array(self._sim.get_agent_state().position)
-        if self._last_pos and np.allclose(self._last_pos, pos):
-            return
+    def _compute_distance(self, pos, episode: SequentialEpisode) -> float:
         step_goals = episode.steps[episode._current_step_index].goals
-        self._metric = self._sim.geodesic_distance(pos, step_goals)
+        return self._sim.geodesic_distance(pos, [goal.position for goal in step_goals])
+
+    def reset_metric(self, *args: Any, episode: SequentialEpisode, **kwargs: Any) -> None:
+        self._last_pos = np.array(self._sim.get_agent_state().position)
+        self._metric = self._compute_distance(self._last_pos, episode)
+
+    def update_metric(self, *args: Any, episode: SequentialEpisode, **kwargs: Any) -> None:
+        pos = np.array(self._sim.get_agent_state().position)
+        if np.allclose(self._last_pos, pos):
+            return
+        self._metric = self._compute_distance(pos, episode)
         self._last_pos = pos
 
 
@@ -176,21 +178,20 @@ class SequentialSPL(Measure):
                                         for pos, d in last)) for goal in step.goals]
         return min(d for _, d in last)
 
-
     def reset_metric(self, *args: Any, episode: SequentialEpisode,
                      task: SequentialNavigationTask, **kwargs: Any) -> None:
         task.measurements.check_measure_dependencies(self.uuid, [SequentialSuccess.cls_uuid])
         self._shortest_dist = self._compute_shortest_dist(episode)
         self._cumul_dist = 0.0
-        self._last_pos = None
+        self._last_pos = np.array(self._sim.get_agent_state().position)
         self._metric = 0.0
 
     def update_metric(self, *args: Any, episode: SequentialEpisode,
                       task: SequentialNavigationTask, **kwargs: Any) -> None:
         pos = np.array(self._sim.get_agent_state().position)
-        if self._last_pos and np.allclose(self._last_pos, pos):
+        if np.allclose(self._last_pos, pos):
             return
         self._cumul_dist += np.linalg.norm(pos - self._last_pos)
-        if task.measurements.measures[SequentialSuccess.cls_uuid]:
-            self._metric = self._shortest_path / self._cumul_dist
+        if task.measurements.measures[SequentialSuccess.cls_uuid].get_metric():
+            self._metric = self._shortest_dist / self._cumul_dist
         self._last_pos = pos
