@@ -14,9 +14,7 @@ from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, SpawnedObject
 from habitat.datasets.spawned_objectnav.utils import DEFAULT_SCENE_PATH_PREFIX, \
                                                      DEFAULT_SCENE_PATH_EXT, \
                                                      DEFAULT_OBJECT_PATH_PREFIX, \
-                                                     DEFAULT_OBJECT_PATH_EXT, \
-                                                     strip_scene_id, \
-                                                     strip_object_template_id
+                                                     DEFAULT_OBJECT_PATH_EXT
 
 
 def create_object_pool(objects_dir: str) -> Tuple[Dict[str, Set[str]], Dict[str, int]]:
@@ -77,7 +75,7 @@ def generate_spawned_objectgoal(sim: Simulator,
     return SpawnedObjectGoal(position=obj_pos,
                              orientation=obj_rot,
                              radius=goal_radius,
-                             object_template_id=strip_object_template_id(tmpl_id))
+                             object_template_id=tmpl_id)
 
 
 def generate_spawned_objectnav_episode(sim: Simulator,
@@ -101,7 +99,7 @@ def generate_spawned_objectnav_episode(sim: Simulator,
              for tmpl_id in tmpl_ids]
 
     return SpawnedObjectNavEpisode(episode_id=ep_id,
-                                   scene_id=strip_scene_id(sim.habitat_config.SCENE),
+                                   scene_id=sim.habitat_config.SCENE,
                                    start_position=start_pos,
                                    start_rotation=start_rot,
                                    object_category=category,

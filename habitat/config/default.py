@@ -211,6 +211,68 @@ _C.TASK.DISTANCE_TO_GOAL.DISTANCE_TO = "POINT"
 _C.TASK.ANSWER_ACCURACY = CN()
 _C.TASK.ANSWER_ACCURACY.TYPE = "AnswerAccuracy"
 # -----------------------------------------------------------------------------
+# SPAWNED OBJECTNAV TASK
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# SPAWNED OBJECTNAV CATEGORY SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.SPAWNED_OBJECTGOAL_CATEGORY = CN()
+_C.TASK.SPAWNED_OBJECTGOAL_CATEGORY.TYPE = "SpawnedObjectGoalCategorySensor"
+# -----------------------------------------------------------------------------
+# SPAWNED OBJECTNAV APPEARANCE SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE = CN()
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.TYPE = "SpawnedObjectGoalAppearanceSensor"
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.OUT_OF_CONTEXT = False
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.OUT_OF_CONTEXT_POS = [0.0, 50.0, 0.0]
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.NUM_VIEWS = 6
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.MIN_VIEW_DISTANCE = 0.5
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.MAX_VIEW_DISTANCE = 2.0
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.ISLAND_RADIUS = 0.2
+_C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.RANDOM_OBJECT_ORIENTATION = "DISABLE"
+# -----------------------------------------------------------------------------
+# SEQUENTIAL NAV TASK
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# DISTANCE TO NEXT GOAL
+# -----------------------------------------------------------------------------
+_C.TASK.DISTANCE_TO_NEXT_GOAL = CN()
+_C.TASK.DISTANCE_TO_NEXT_GOAL.TYPE = "DistanceToNextGoal"
+# -----------------------------------------------------------------------------
+# SEQUENTIAL SUCCESS
+# -----------------------------------------------------------------------------
+_C.TASK.SEQUENTIAL_SUCCESS = CN()
+_C.TASK.SEQUENTIAL_SUCCESS.TYPE = "SequentialSuccess"
+_C.TASK.SEQUENTIAL_SUCCESS.SUCCESS_DISTANCE = 1.0
+# -----------------------------------------------------------------------------
+# SEQUENTIAL PROGRESS
+# -----------------------------------------------------------------------------
+_C.TASK.SEQUENTIAL_PROGRESS = CN()
+_C.TASK.SEQUENTIAL_PROGRESS.TYPE = "SequentialProgress"
+# -----------------------------------------------------------------------------
+# SEQUENTIAL SPL
+# -----------------------------------------------------------------------------
+_C.TASK.SEQUENTIAL_SPL = CN()
+_C.TASK.SEQUENTIAL_SPL.TYPE = "SequentialSPL"
+# -----------------------------------------------------------------------------
+# SEQUENTIAL OBJECTNAV TASK
+# -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# SEQUENTIAL OBJECTGOAL CATEGORY SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.SEQUENTIAL_OBJECTGOAL_CATEGORY = CN()
+_C.TASK.SEQUENTIAL_OBJECTGOAL_CATEGORY.TYPE = "SequentialObjectGoalCategorySensor"
+_C.TASK.SEQUENTIAL_OBJECTGOAL_CATEGORY.PADDING_VALUE = -1
+_C.TASK.SEQUENTIAL_OBJECTGOAL_CATEGORY.SEQUENTIAL_MODE = "FULL"
+# -----------------------------------------------------------------------------
+# SEQUENTIAL OBJECTGOAL APPEARANCE SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE = CN()
+_C.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.TYPE = "SequentialObjectGoalAppearanceSensor"
+_C.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.PADDING_VALUE = 0
+_C.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.SEQUENTIAL_MODE = "FULL"
+
+# -----------------------------------------------------------------------------
 # SIMULATOR
 # -----------------------------------------------------------------------------
 _C.SIMULATOR = CN()
@@ -427,7 +489,10 @@ _C.DATASET.CONTENT_SCENES = ["*"]
 _C.DATASET.DATA_PATH = (
     "data/datasets/pointnav/habitat-test-scenes/v1/{split}/{split}.json.gz"
 )
-
+# -----------------------------------------------------------------------------
+# SPAWNED OBJECTNAV DATASET
+# -----------------------------------------------------------------------------
+_C.DATASET.OBJECTS_DIR = "data/object_datasets"
 # -----------------------------------------------------------------------------
 
 

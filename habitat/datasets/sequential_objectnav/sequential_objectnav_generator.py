@@ -10,7 +10,6 @@ import habitat
 from habitat.core.simulator import Simulator
 from habitat.datasets.spawned_objectnav.spawned_objectnav_generator \
         import create_object_pool, create_scene_pool, generate_spawned_objectgoal
-from habitat.datasets.spawned_objectnav.utils import strip_scene_id
 from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNavStep, \
                                                               SequentialObjectNavEpisode
 
@@ -44,7 +43,7 @@ def generate_sequential_objectnav_episode(sim: Simulator,
                                              goals=goals))
 
     return SequentialObjectNavEpisode(episode_id=ep_id,
-                                      scene_id=strip_scene_id(sim.habitat_config.SCENE),
+                                      scene_id=sim.habitat_config.SCENE,
                                       start_position=start_pos,
                                       start_rotation=start_rot,
                                       steps=steps)

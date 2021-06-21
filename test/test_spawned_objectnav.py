@@ -76,7 +76,7 @@ def test_generate_episode():
         episode = generate_spawned_objectnav_episode(sim, object_pool, category_index_map,
                                                      "ep{}".format(i), rng, 2, 1.0, rot)
         assert episode.episode_id == "ep{}".format(i)
-        assert episode.scene_id == "gibson/Ackermanville"
+        assert episode.scene_id == cfg.SCENE
         assert sim.island_radius(episode.start_position) > 0.2
         assert episode.object_category in {"box", "chair", "sphere", "donut"}
         assert episode.object_category_index == category_index_map[episode.object_category]
@@ -120,7 +120,7 @@ def test_dataset():
     dataset = habitat.make_dataset(cfg.TYPE, config=cfg)
 
     all_tmpl_ids = dataset.get_objects_to_load()
-    expected = set(glob.glob("data/object_datasets/test_objects/**/*.object_config.json", recursive=True))
+    expected = set(glob.glob("./data/object_datasets/test_objects/**/*.object_config.json", recursive=True))
     assert all(tmpl_id in expected for tmpl_id in all_tmpl_ids)
     ep0_tmpl_ids = dataset.get_objects_to_load(dataset.episodes[0])
     assert all(tmpl_id in all_tmpl_ids for tmpl_id in ep0_tmpl_ids)
