@@ -10,7 +10,8 @@ from habitat.core.embodied_task import EmbodiedTask, Measure, Action
 from habitat.core.registry import registry
 from habitat.core.simulator import Simulator, Sensor, SensorTypes, Observations
 from habitat.core.utils import not_none_validator
-from habitat.tasks.nav.nav import NavigationGoal, NavigationTask
+from habitat.tasks.nav.nav import NavigationGoal, NavigationTask, TopDownMap
+from habitat.utils.visualizations import maps
 
 
 @attr.s(auto_attribs=True, kw_only=True)
@@ -131,6 +132,55 @@ class SequentialSuccess(Measure):
             self._metric = True
 
 
+#TODO(gbono): SequentialPointgoalSensor
+#TODO(gbono): SequentialPointgoalGPSCompassSensor
+
+
+@registry.register_measure
+class SequentialTopDownMap(TopDownMap):
+    def _compute_shortest_path(self, episode: SequentialEpisode,
+                                     start_pos: List[float]) -> List[List[float]]:
+        last = [(start_pos, 0.0, None)]
+        values = []
+        for step in episode.steps[episode._current_step_index:]:
+            values.append(last)
+            last = [(g.position, *min((d + self._sim.geodesic_distance(pos, g.position), i)
+                                      for i, (pos, d, _) in enumerate(last)))
+                    for g in step.goals]
+
+        pos, _, back = min(last, key=lambda tup: tup[1])
+        path = []
+        while back is not None:
+            prv_pos, _, back = values.pop()[back]
+            path.extend(reversed(self._sim.get_straight_shortest_path_points(prv_pos, pos)))
+            pos = prv_pos
+        path.reverse()
+        return path
+
+    def _draw_goals_view_points(self, episode: SequentialEpisode) -> None:
+        for step in episode.steps:
+            super()._draw_goals_view_points(step)
+
+    def _draw_goals_positions(self, episode: SequentialEpisode) -> None:
+        for step in episode.steps:
+            super()._draw_goals_positions(step)
+
+    def _draw_goals_aabb(self, episode: SequentialEpisode) -> None:
+        for step in episode.steps:
+            super()._draw_goals_aabb(step)
+
+    def _draw_shortest_path(self, episode: SequentialEpisode,
+                                  agent_position: List[float]) -> None:
+        if self._config.DRAW_SHORTEST_PATH:
+            path = self._compute_shortest_path(episode, agent_position)
+            self._shortest_path_points = [maps.to_grid(p[2], p[0],
+                                                       self._top_down_map.shape[0:2],
+                                                       sim=self._sim)
+                                          for p in path]
+            maps.draw_path(self._top_down_map, self._shortest_path_points,
+                           maps.MAP_SHORTEST_PATH_COLOR, self.line_thickness)
+
+
 @registry.register_measure
 class SequentialSPL(Measure):
     _sim: Simulator
@@ -149,7 +199,7 @@ class SequentialSPL(Measure):
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
         return "sequential_spl"
 
-    def _compute_shortest_dist(self, episode: SequentialEpisode):
+    def _compute_shortest_dist(self, episode: SequentialEpisode) -> float:
         last = [(episode.start_position, 0.0)]
         for step in episode.steps:
             last = [(goal.position, min(d + self._sim.geodesic_distance(pos, goal.position)
@@ -214,7 +264,7 @@ class PPL(Measure):
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
         return "ppl"
 
-    def _compute_shortest_dist(self, episode: SequentialEpisode):
+    def _compute_shortest_dist(self, episode: SequentialEpisode) -> List[float]:
         last = [(episode.start_position, 0.0, None)]
         values = []
         for step in episode.steps:
