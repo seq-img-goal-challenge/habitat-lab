@@ -29,9 +29,9 @@ def generate_sequential_objectnav_episode(sim: Simulator,
     start_rot = [*(np.sin(0.5 * a) * sim.up_vector), np.cos(0.5 * a)]
 
     step_count = rng.integers(min_seq_len, max_seq_len, endpoint=True)
+    selected_categories = rng.choice(list(object_pool.items()), step_count, replace=False)
     steps = []
-    for _ in range(step_count):
-        category, tmpl_ids = rng.choice(list(object_pool.items()))
+    for category, tmpl_ids in selected_categories:
         cat_index = category_index_map[category]
         if len(tmpl_ids) > max_goals:
             tmpl_ids = rng.choice(list(tmpl_ids), max_goals, replace=True)
