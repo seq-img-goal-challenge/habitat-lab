@@ -150,7 +150,6 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
             # should we enforce balance of num_views between goals or not?
         views = np.array(list(chain.from_iterable(goal._appearance_cache
                                                   for goal in episode.goals)))
-        np.random.shuffle(views)
         return views
 
 

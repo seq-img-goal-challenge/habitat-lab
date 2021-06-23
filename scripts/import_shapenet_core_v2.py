@@ -8,6 +8,7 @@ import argparse
 
 DEFAULT_ARGS = {"input_file": "ShapeNetCore.v2.zip",
                 "output_dir": "data/object_datasets/shapenet_core_v2",
+                "max_size": 0.6,
                 "categories": ['*'],
                 "display_cols": 5}
 
@@ -16,6 +17,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--input-file", "-i")
     parser.add_argument("--output-dir", "-o")
+    parser.add_argument("--max-size", "-m")
     parser.add_argument("--prompt", "-p", action='store_true')
     parser.add_argument("--categories", "-c", nargs='*')
     parser.add_argument("--display-cols", "-d", type=int)
@@ -103,29 +105,36 @@ def extract_files(categories, counts, to_extract, input_file):
     return to_extract
 
 
-def make_object_config(model_entry, synset_id):
+def make_object_config(model_entry, synset_id, max_size):
     json_path = os.path.join(model_entry.path, "models", "model_normalized.json")
+    ox, oy, oz = 0.0, 0.0, 0.0
+    scale = 1.0
     try:
         with open(json_path) as f:
-            centroid = json.load(f)["centroid"]
+            obj_data = json.load(f)
         os.remove(json_path)
+        ox, _, oz = obj_data["centroid"]
+        _, oy, _ = obj_data["min"]
+        size = max(up - low for up, low in zip(obj_data["max"], obj_data["min"]))
+        if size > max_size:
+            scale = max_size / size
     except FileNotFoundError as e:
         print("Warning! Model '{}' is not normalized as expected".format(model_entry.name))
-        centroid = [0.0, 0.0, 0.0]
 
     rel_obj_path = os.path.join(model_entry.name, "models", "model_normalized.obj")
     with open(model_entry.path + OBJ_CFG_EXT, 'wt') as f:
         json.dump({"render_asset": rel_obj_path,
                    "up": [0.0, 1.0, 0.0],
                    "front": [0.0, 0.0, -1.0],
-                   "COM": centroid,
+                   "COM": [ox, oy, oz],
+                   "scale": [scale, scale, scale],
                    "is_collidable": True,
                    "use_bounding_box_for_collision": True,
                    "requires_lighting": True,
                    "semantic_id": int(synset_id)}, f, indent=2)
 
 
-def move_files(categories, extracted, output_dir):
+def move_files(categories, extracted, output_dir, max_size):
     total = len(extracted)
     w_cat = max(len(cat) for cat in extracted)
     w_i = len(str(total))
@@ -145,7 +154,7 @@ def move_files(categories, extracted, output_dir):
         with os.scandir(out_base) as dir_iter:
             models = [entry for entry in dir_iter if entry.is_dir()]
         for entry in tqdm.tqdm(models, desc=f"Moving {cat: >{w_cat}} ({i: {w_i}d}/{total})"):
-            make_object_config(entry, synset_id)
+            make_object_config(entry, synset_id, max_size)
 
 
 def cleanup():
@@ -161,7 +170,7 @@ def main(args):
     desired_cat = check_desired_categories(categories, desired_cat)
     to_extract = check_existing_dirs(desired_cat, args.output_dir)
     extracted = extract_files(categories, counts, to_extract, args.input_file)
-    move_files(categories, extracted, args.output_dir)
+    move_files(categories, extracted, args.output_dir, args.max_size)
     cleanup()
 
 
