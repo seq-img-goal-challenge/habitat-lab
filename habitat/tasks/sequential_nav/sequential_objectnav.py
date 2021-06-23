@@ -43,8 +43,8 @@ class SequentialObjectGoalCategorySensor(SpawnedObjectGoalCategorySensor):
     _max_seq_len: int
     _pad_val: int
 
-    def __init__(self, config: Config, dataset: "SequentialObjectNavDatasetV1",
-                 *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, config: Config, dataset: "SequentialObjectNavDatasetV1",
+                 **kwargs: Any) -> None:
         self._max_seq_len = dataset.get_max_sequence_len()
         self._pad_val = config.PADDING_VALUE
         super().__init__(config=config, dataset=dataset, *args, **kwargs)
@@ -57,8 +57,8 @@ class SequentialObjectGoalCategorySensor(SpawnedObjectGoalCategorySensor):
                               high=max(self._max_object_category_index, self._pad_val),
                               shape=(self._max_seq_len, 1), dtype=np.int64)
 
-    def get_observation(self, episode: SequentialObjectNavEpisode,
-                        *args: Any, **kwargs: Any) -> np.ndarray:
+    def get_observation(self, *args: Any, episode: SequentialObjectNavEpisode,
+                        **kwargs: Any) -> np.ndarray:
         if self.config.SEQUENTIAL_MODE == "MYOPIC":
             return np.array([episode.steps[episode._current_step_index].object_category_index],
                             dtype=np.int64)
@@ -75,8 +75,8 @@ class SequentialObjectGoalAppearanceSensor(SpawnedObjectGoalAppearanceSensor):
     _max_seq_len: int
     _pad_val: int
 
-    def __init__(self, config: Config, sim: Simulator, dataset: "SequentialObjectNavDatasetV1",
-                 *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, config: Config, sim: Simulator,
+                 dataset: "SequentialObjectNavDatasetV1", **kwargs: Any) -> None:
         self._max_seq_len = dataset.get_max_sequence_len()
         self._pad_val = config.PADDING_VALUE
         super().__init__(config=config, sim=sim, *args, **kwargs)
@@ -93,8 +93,8 @@ class SequentialObjectGoalAppearanceSensor(SpawnedObjectGoalAppearanceSensor):
                               high=np.max(high, self._pad_val),
                               dtype=src_space.dtype)
 
-    def get_observation(self, episode: SequentialObjectNavEpisode,
-                        *args: Any, **kwargs: Any) -> np.ndarray:
+    def get_observation(self, *args: Any, episode: SequentialObjectNavEpisode,
+                        **kwargs: Any) -> np.ndarray:
         if self.config.SEQUENTIAL_MODE == "MYOPIC":
             return super().get_observation(episode.steps[episode._current_step_index])
 
@@ -105,4 +105,4 @@ class SequentialObjectGoalAppearanceSensor(SpawnedObjectGoalAppearanceSensor):
         pad_len = self._max_seq_len - len(steps)
         obs = np.stack([super().get_observation(step) for step in steps], 0)
         pad = np.full(self._pad_val, (pad_len,) + obs.shape[1:])
-        return np.concatenate([step_obs, pad], 0)
+        return np.concatenate([obs, pad], 0)
