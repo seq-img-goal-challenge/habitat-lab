@@ -1,4 +1,4 @@
-from typing import Any, Optional, List
+from typing import Any, Optional, List, Dict
 
 import attr
 import numpy as np
@@ -10,7 +10,9 @@ from habitat.core.embodied_task import EmbodiedTask, Measure, Action
 from habitat.core.registry import registry
 from habitat.core.simulator import Simulator, Sensor, SensorTypes, Observations
 from habitat.core.utils import not_none_validator
-from habitat.tasks.nav.nav import NavigationGoal, NavigationTask, TopDownMap
+from habitat.tasks.nav.nav import NavigationGoal, NavigationTask, NavigationEpisode, \
+                                  PointGoalSensor, IntegratedPointGoalGPSAndCompassSensor, \
+                                  TopDownMap
 from habitat.utils.visualizations import maps
 
 
@@ -24,10 +26,14 @@ class SequentialEpisode(Episode):
     steps: List[SequentialStep] = attr.ib(default=None, validator=not_none_validator)
     _current_step_index: int = attr.ib(init=False, default=0)
 
-    def __getstate__(self):
+    @property
+    def num_steps(self):
+        return len(self.steps)
+
+    def __getstate__(self) -> Dict[str, Any]:
         return {k: v for k, v in vars(self).items() if not k.startswith('_')}
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
         self._current_step_index = 0
 
@@ -36,7 +42,7 @@ class SequentialEpisode(Episode):
 class SequentialDataset(Dataset):
     episodes: List[SequentialEpisode] = attr.ib(default=None, validator=not_none_validator)
 
-    def get_max_sequence_len(self):
+    def get_max_sequence_len(self) -> int:
         return max(len(episode.steps) for episode in self.episodes)
 
 
@@ -53,7 +59,7 @@ class SequentialNavigationTask(NavigationTask):
         episode._current_step_index = 0
         return super().reset(episode)
 
-    def _is_on_last_step(self, episode: SequentialEpisode):
+    def _is_on_last_step(self, episode: SequentialEpisode) -> bool:
         return episode._current_step_index == len(episode.steps) - 1
 
     def _check_episode_is_active(self, *args: Any, episode: SequentialEpisode,
@@ -73,6 +79,119 @@ class SequentialNavigationTask(NavigationTask):
                     return False
         else:
             return True
+
+
+def make_sequential(base_sensor_cls):
+    class SequentialSensor(base_sensor_cls):
+        _max_seq_len: int
+        _pad_val: int
+        _seq_mode: str
+
+        def __init__(self, *args: Any, sim: Simulator, config: Config,
+                     dataset: SequentialDataset, **kwargs: Any) -> None:
+            self._max_seq_len = dataset.get_max_sequence_len()
+            self._pad_val = config.PADDING_VALUE
+            self._seq_mode = config.SEQUENTIAL_MODE
+            super().__init__(*args, sim=sim, config=config, dataset=dataset, **kwargs)
+
+        def _get_observation_space(self, *args: Any, **kwargs: Any) -> Space:
+            src_space = super()._get_observation_space(*args, **kwargs)
+            if self.config.SEQUENTIAL_MODE == "MYOPIC":
+                return src_space
+            elif isinstance(src_space, spaces.Box):
+                extended_shape = (self._max_seq_len,) + src_space.shape
+                low = np.broadcast_to(src_space.low, extended_shape)
+                high = np.broadcast_to(src_space.high, extended_shape)
+                return spaces.Box(low=np.min(low, self._pad_val),
+                                  high=np.max(high, self._pad_val),
+                                  dtype=src_space.dtype)
+            else:
+                raise NotImplementedError(f"Cannot make sequential sensor" \
+                        + "for observation space of type '{type(src_space)}'")
+
+        def _get_observation_for_step(self, episode: SequentialEpisode, step_index: int,
+                                      *args: Any, **kwargs: Any) -> Any:
+            step = episode.steps[step_index]
+            step_id = f"{episode.episode_id}_{step_index}"
+            step_as_episode = NavigationEpisode(episode_id=step_id,
+                                                scene_id=episode.scene_id,
+                                                start_position=episode.start_position,
+                                                start_rotation=episode.start_rotation,
+                                                goals=step.goals)
+            return super().get_observation(*args, episode=step_as_episode, **kwargs)
+
+        def get_observation(self, *args: Any, episode: SequentialEpisode,
+                            **kwargs: Any) -> Any:
+            if self._seq_mode == "MYOPIC":
+                return self._get_observation_for_step(episode, episode._current_step_index,
+                                                      *args, **kwargs)
+            if self._seq_mode == "PREFIX":
+                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
+                           for idx in range(0, episode._current_step_index + 1)]
+            elif self._seq_mode == "SUFFIX":
+                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
+                           for idx in range(episode._current_step_index, episode.num_steps)]
+            elif self._seq_mode == "FULL":
+                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
+                           for idx in range(0, episode.num_steps)]
+            obs_seq = np.stack(obs_seq, 0)
+            pad_len = self._max_seq_len - obs_seq.shape[0]
+            pad = np.full(self._pad_val, (pad_len,) + obs_seq.shape[1:])
+            return np.concatenate([obs_seq, pad], 0)
+
+    return SequentialSensor
+
+
+SequentialPointGoalSensor = make_sequential(PointGoalSensor)
+registry.register_sensor(SequentialPointGoalSensor)
+
+SequentialOnlinePointGoalSensor = make_sequential(IntegratedPointGoalGPSAndCompassSensor)
+registry.register_sensor(SequentialOnlinePointGoalSensor)
+
+
+@registry.register_measure
+class SequentialTopDownMap(TopDownMap):
+    def _compute_shortest_path(self, episode: SequentialEpisode,
+                                     start_pos: List[float]) -> List[List[float]]:
+        last = [(start_pos, 0.0, None)]
+        values = []
+        for step in episode.steps[episode._current_step_index:]:
+            values.append(last)
+            last = [(g.position, *min((d + self._sim.geodesic_distance(pos, g.position), i)
+                                      for i, (pos, d, _) in enumerate(last)))
+                    for g in step.goals]
+
+        pos, _, back = min(last, key=lambda tup: tup[1])
+        path = []
+        while back is not None:
+            prv_pos, _, back = values.pop()[back]
+            path.extend(reversed(self._sim.get_straight_shortest_path_points(prv_pos, pos)))
+            pos = prv_pos
+        path.reverse()
+        return path
+
+    def _draw_goals_view_points(self, episode: SequentialEpisode) -> None:
+        for step in episode.steps:
+            super()._draw_goals_view_points(step)
+
+    def _draw_goals_positions(self, episode: SequentialEpisode) -> None:
+        for step in episode.steps:
+            super()._draw_goals_positions(step)
+
+    def _draw_goals_aabb(self, episode: SequentialEpisode) -> None:
+        for step in episode.steps:
+            super()._draw_goals_aabb(step)
+
+    def _draw_shortest_path(self, episode: SequentialEpisode,
+                                  agent_position: List[float]) -> None:
+        if self._config.DRAW_SHORTEST_PATH:
+            path = self._compute_shortest_path(episode, agent_position)
+            self._shortest_path_points = [maps.to_grid(p[2], p[0],
+                                                       self._top_down_map.shape[0:2],
+                                                       sim=self._sim)
+                                          for p in path]
+            maps.draw_path(self._top_down_map, self._shortest_path_points,
+                           maps.MAP_SHORTEST_PATH_COLOR, self.line_thickness)
 
 
 @registry.register_measure
@@ -130,55 +249,6 @@ class SequentialSuccess(Measure):
         d = task.measurements.measures[DistanceToNextGoal.cls_uuid].get_metric()
         if task.is_stop_called and d <= self._radius:
             self._metric = True
-
-
-#TODO(gbono): SequentialPointgoalSensor
-#TODO(gbono): SequentialPointgoalGPSCompassSensor
-
-
-@registry.register_measure
-class SequentialTopDownMap(TopDownMap):
-    def _compute_shortest_path(self, episode: SequentialEpisode,
-                                     start_pos: List[float]) -> List[List[float]]:
-        last = [(start_pos, 0.0, None)]
-        values = []
-        for step in episode.steps[episode._current_step_index:]:
-            values.append(last)
-            last = [(g.position, *min((d + self._sim.geodesic_distance(pos, g.position), i)
-                                      for i, (pos, d, _) in enumerate(last)))
-                    for g in step.goals]
-
-        pos, _, back = min(last, key=lambda tup: tup[1])
-        path = []
-        while back is not None:
-            prv_pos, _, back = values.pop()[back]
-            path.extend(reversed(self._sim.get_straight_shortest_path_points(prv_pos, pos)))
-            pos = prv_pos
-        path.reverse()
-        return path
-
-    def _draw_goals_view_points(self, episode: SequentialEpisode) -> None:
-        for step in episode.steps:
-            super()._draw_goals_view_points(step)
-
-    def _draw_goals_positions(self, episode: SequentialEpisode) -> None:
-        for step in episode.steps:
-            super()._draw_goals_positions(step)
-
-    def _draw_goals_aabb(self, episode: SequentialEpisode) -> None:
-        for step in episode.steps:
-            super()._draw_goals_aabb(step)
-
-    def _draw_shortest_path(self, episode: SequentialEpisode,
-                                  agent_position: List[float]) -> None:
-        if self._config.DRAW_SHORTEST_PATH:
-            path = self._compute_shortest_path(episode, agent_position)
-            self._shortest_path_points = [maps.to_grid(p[2], p[0],
-                                                       self._top_down_map.shape[0:2],
-                                                       sim=self._sim)
-                                          for p in path]
-            maps.draw_path(self._top_down_map, self._shortest_path_points,
-                           maps.MAP_SHORTEST_PATH_COLOR, self.line_thickness)
 
 
 @registry.register_measure
