@@ -231,14 +231,14 @@ _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.RANDOM_OBJECT_ORIENTATION = "DISABLE"
 # -----------------------------------------------------------------------------
 _C.TASK.SEQUENTIAL_POINTGOAL_SENSOR = _C.TASK.POINTGOAL_SENSOR.clone()
 _C.TASK.SEQUENTIAL_POINTGOAL_SENSOR.TYPE = "SequentialPointGoalSensor"
-_C.TASK.SEQUENTIAL_POINTGOAL_SENSOR.PADDING_VALUE = -1
+_C.TASK.SEQUENTIAL_POINTGOAL_SENSOR.PADDING_VALUE = 0.0
 _C.TASK.SEQUENTIAL_POINTGOAL_SENSOR.SEQUENTIAL_MODE = "FULL"
 # -----------------------------------------------------------------------------
 # SEQUENTIAL POINTGOAL WITH GPS+COMPASS SENSOR
 # -----------------------------------------------------------------------------
 _C.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR = _C.TASK.POINTGOAL_WITH_GPS_COMPASS_SENSOR.clone()
 _C.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.TYPE = "SequentialOnlinePointGoalSensor"
-_C.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.PADDING_VALUE = -1
+_C.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.PADDING_VALUE = 0.0
 _C.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.SEQUENTIAL_MODE = "FULL"
 # -----------------------------------------------------------------------------
 # SEQUENTIAL TOP DOWN MAP MEASUREMENT
@@ -256,6 +256,7 @@ _C.TASK.DISTANCE_TO_NEXT_GOAL.TYPE = "DistanceToNextGoal"
 _C.TASK.SEQUENTIAL_SUCCESS = CN()
 _C.TASK.SEQUENTIAL_SUCCESS.TYPE = "SequentialSuccess"
 _C.TASK.SEQUENTIAL_SUCCESS.SUCCESS_DISTANCE = 1.0
+# -----------------------------------------------------------------------------
 # SEQUENTIAL SPL MEASUREMENT
 # -----------------------------------------------------------------------------
 _C.TASK.SEQUENTIAL_SPL = CN()
