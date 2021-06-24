@@ -38,9 +38,8 @@ class SequentialEpisode(Episode):
         self._current_step_index = 0
 
 
-@attr.s(auto_attribs=True, kw_only=True)
 class SequentialDataset(Dataset):
-    episodes: List[SequentialEpisode] = attr.ib(default=None, validator=not_none_validator)
+    episodes: List[SequentialEpisode]
 
     def get_max_sequence_len(self) -> int:
         return max(len(episode.steps) for episode in self.episodes)
@@ -49,10 +48,12 @@ class SequentialDataset(Dataset):
 @registry.register_task(name="SequentialNav-v0")
 class SequentialNavigationTask(NavigationTask):
     is_stop_called: bool
+    _success_d: float
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, config: Config, **kwargs: Any) -> None:
         self.is_stop_called = False
-        super().__init__(*args, **kwargs)
+        self._success_d = config.SUCCESS_DISTANCE
+        super().__init__(*args, config=config, **kwargs)
 
     def reset(self, episode: SequentialEpisode) -> Observations:
         self.is_stop_called = False
@@ -71,7 +72,8 @@ class SequentialNavigationTask(NavigationTask):
                 ag_pos = self._sim.get_agent_state().position
                 step = episode.steps[episode._current_step_index]
                 d = self._sim.geodesic_distance(ag_pos, [goal.position for goal in step.goals])
-                if any(d <= goal.radius for goal in step.goals):
+                if d <= self._success_d or any(goal.radius is not None and d <= goal.radius
+                                               for goal in step.goals):
                     episode._current_step_index += 1
                     self.is_stop_called = False
                     return True
@@ -106,8 +108,8 @@ def make_sequential(base_sensor_cls, *, name=None):
                 extended_shape = (self._max_seq_len,) + src_space.shape
                 low = np.broadcast_to(src_space.low, extended_shape)
                 high = np.broadcast_to(src_space.high, extended_shape)
-                return spaces.Box(low=np.min(low, self._pad_val),
-                                  high=np.max(high, self._pad_val),
+                return spaces.Box(low=np.minimum(low, self._pad_val),
+                                  high=np.maximum(high, self._pad_val),
                                   dtype=src_space.dtype)
             else:
                 raise NotImplementedError(f"Cannot make sequential sensor" \
@@ -140,7 +142,7 @@ def make_sequential(base_sensor_cls, *, name=None):
                            for idx in range(0, episode.num_steps)]
             obs_seq = np.stack(obs_seq, 0)
             pad_len = self._max_seq_len - obs_seq.shape[0]
-            pad = np.full(self._pad_val, (pad_len,) + obs_seq.shape[1:])
+            pad = np.full((pad_len,) + obs_seq.shape[1:], self._pad_val)
             return np.concatenate([obs_seq, pad], 0)
 
     return SequentialSensor
