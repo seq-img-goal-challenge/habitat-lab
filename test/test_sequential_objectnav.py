@@ -20,7 +20,7 @@ def test_registration():
     from habitat.tasks.sequential_nav.sequential_nav import SequentialSuccess, \
                                                             DistanceToNextGoal, \
                                                             SequentialSPL, \
-                                                            SequentialProgress
+                                                            Progress
 
     assert registry.get_dataset("SequentialObjectNav-v0") is SequentialObjectNavDatasetV0
     assert registry.get_task("SequentialObjectNav-v0") is SequentialObjectNavTask
@@ -31,7 +31,7 @@ def test_registration():
     assert registry.get_measure("SequentialSuccess") is SequentialSuccess
     assert registry.get_measure("DistanceToNextGoal") is DistanceToNextGoal
     assert registry.get_measure("SequentialSPL") is SequentialSPL
-    assert registry.get_measure("SequentialProgress") is SequentialProgress
+    assert registry.get_measure("Progress") is Progress
 
 
 def test_generate_dataset():
@@ -41,7 +41,7 @@ def test_generate_dataset():
     generate_sequential_objectnav_dataset("configs/tasks/pointnav_gibson.yaml", [
         "DATASET.TYPE", "SequentialObjectNav-v0",
         "DATASET.DATA_PATH", "data/datasets/sequential_objectnav/testgen/{split}/{split}.json.gz",
-    ], 10, 3, 8, 5, 1.0, "YAXIS", "OVERRIDE",
+    ], 10, 2, 3, 5, 1.0, "YAXIS", "OVERRIDE",
     "data/scene_datasets/gibson/", "data/object_datasets/test_objects/", 123456)
 
 
