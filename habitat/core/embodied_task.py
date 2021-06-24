@@ -287,6 +287,7 @@ class EmbodiedTask:
         for action_instance in self.actions.values():
             action_instance.reset(episode=episode, task=self)
 
+        self._is_episode_active = True
         return observations
 
     def step(self, action: Dict[str, Any], episode: Episode):
