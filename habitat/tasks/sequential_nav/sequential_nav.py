@@ -81,7 +81,11 @@ class SequentialNavigationTask(NavigationTask):
             return True
 
 
-def make_sequential(base_sensor_cls):
+def make_sequential(base_sensor_cls, *, name=None):
+    if name is None:
+        name = "Sequential" + base_sensor_cls.__name__
+
+    @registry.register_sensor(name=name)
     class SequentialSensor(base_sensor_cls):
         _max_seq_len: int
         _pad_val: int
@@ -143,10 +147,8 @@ def make_sequential(base_sensor_cls):
 
 
 SequentialPointGoalSensor = make_sequential(PointGoalSensor)
-registry.register_sensor(SequentialPointGoalSensor)
-
-SequentialOnlinePointGoalSensor = make_sequential(IntegratedPointGoalGPSAndCompassSensor)
-registry.register_sensor(SequentialOnlinePointGoalSensor)
+SequentialOnlinePointGoalSensor = make_sequential(IntegratedPointGoalGPSAndCompassSensor,
+                                                  name="SequentialOnlinePointGoalSensor")
 
 
 @registry.register_measure
