@@ -17,10 +17,6 @@ def test_registration():
             import SequentialObjectNavTask, \
                    SequentialObjectGoalCategorySensor, \
                    SequentialObjectGoalAppearanceSensor
-    from habitat.tasks.sequential_nav.sequential_nav import SequentialSuccess, \
-                                                            DistanceToNextGoal, \
-                                                            SequentialSPL, \
-                                                            Progress
 
     assert registry.get_dataset("SequentialObjectNav-v0") is SequentialObjectNavDatasetV0
     assert registry.get_task("SequentialObjectNav-v0") is SequentialObjectNavTask
@@ -28,10 +24,6 @@ def test_registration():
             is SequentialObjectGoalCategorySensor
     assert registry.get_sensor("SequentialObjectGoalAppearanceSensor") \
             is SequentialObjectGoalAppearanceSensor
-    assert registry.get_measure("SequentialSuccess") is SequentialSuccess
-    assert registry.get_measure("DistanceToNextGoal") is DistanceToNextGoal
-    assert registry.get_measure("SequentialSPL") is SequentialSPL
-    assert registry.get_measure("Progress") is Progress
 
 
 def test_generate_dataset():
@@ -51,33 +43,10 @@ def test_task():
         "DATASET.TYPE", "SequentialObjectNav-v0",
         "DATASET.DATA_PATH", "data/datasets/sequential_objectnav/testgen/{split}/{split}.json.gz",
         "TASK.TYPE", "SequentialObjectNav-v0",
+        "TASK.POSSIBLE_ACTIONS", "['FOUND', 'MOVE_FORWARD', 'TURN_LEFT', 'TURN_RIGHT']",
+        "TASK.SENSORS", "['SEQUENTIAL_OBJECTGOAL_CATEGORY', 'SEQUENTIAL_OBJECTGOAL_APPEARANCE']",
+        "TASK.MEASUREMENTS", "['DISTANCE_TO_NEXT_GOAL', 'SEQUENTIAL_SUCCESS', 'SEQUENTIAL_SPL']"
     ])
-    cfg.defrost()
-    cfg.TASK.SENSORS = ["SEQUENTIAL_OBJECTGOAL_CATEGORY", "SEQUENTIAL_OBJECTGOAL_APPEARANCE"]
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_CATEGORY = habitat.Config()
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_CATEGORY.TYPE = "SequentialObjectGoalCategorySensor"
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_CATEGORY.SEQUENTIAL_MODE = "FULL"
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_CATEGORY.PADDING_VALUE = -1
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE = habitat.Config()
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.TYPE = "SequentialObjectGoalAppearanceSensor"
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.SEQUENTIAL_MODE = "MYOPIC"
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.PADDING_VALUE = -1
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.OUT_OF_CONTEXT = False
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.OUT_OF_CONTEXT_POS = [0.0, 50.0, 0.0]
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.MAX_VIEW_DISTANCE = 2.0
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.MIN_VIEW_DISTANCE = 0.5
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.ISLAND_RADIUS = 0.2
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.RANDOM_OBJECT_ORIENTATION = "DISABLE"
-    cfg.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.NUM_VIEWS = 5
-    cfg.TASK.MEASUREMENTS = ["DISTANCE_TO_NEXT_GOAL", "SEQUENTIAL_SUCCESS", "SEQUENTIAL_SPL"]
-    cfg.TASK.DISTANCE_TO_NEXT_GOAL = habitat.Config()
-    cfg.TASK.DISTANCE_TO_NEXT_GOAL.TYPE = "DistanceToNextGoal"
-    cfg.TASK.SEQUENTIAL_SUCCESS = habitat.Config()
-    cfg.TASK.SEQUENTIAL_SUCCESS.TYPE = "SequentialSuccess"
-    cfg.TASK.SEQUENTIAL_SUCCESS.SUCCESS_DISTANCE = 1.0
-    cfg.TASK.SEQUENTIAL_SPL = habitat.Config()
-    cfg.TASK.SEQUENTIAL_SPL.TYPE = "SequentialSPL"
-    cfg.freeze()
 
     env = habitat.Env(cfg)
     obs = env.reset()

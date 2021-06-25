@@ -234,6 +234,11 @@ _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.RANDOM_OBJECT_ORIENTATION = "DISABLE"
 # SEQUENTIAL NAV TASK
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
+# ACTIONS
+# -----------------------------------------------------------------------------
+_C.TASK.ACTIONS.FOUND = CN()
+_C.TASK.ACTIONS.FOUND.TYPE = "FoundAction"
+# -----------------------------------------------------------------------------
 # SEQUENTIAL POINTGOAL SENSOR
 # -----------------------------------------------------------------------------
 _C.TASK.SEQUENTIAL_POINTGOAL_SENSOR = _C.TASK.POINTGOAL_SENSOR.clone()

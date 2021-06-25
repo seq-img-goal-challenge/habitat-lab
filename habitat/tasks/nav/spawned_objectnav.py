@@ -164,7 +164,7 @@ class SpawnedObjectNavTask(NavigationTask):
         self._template_manager = sim.get_object_template_manager()
         self._loaded_object_templates = {}
         self.is_stop_called = False
-        super().__init__(config, sim, dataset)
+        super().__init__(config=config, sim=sim, dataset=dataset)
 
     def _reload_templates(self, episode: SpawnedObjectNavEpisode) -> None:
         loaded = set(self._loaded_object_templates)

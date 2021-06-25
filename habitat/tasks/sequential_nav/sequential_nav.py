@@ -6,7 +6,7 @@ from gym import Space, spaces
 
 from habitat.config import Config
 from habitat.core.dataset import Dataset, Episode
-from habitat.core.embodied_task import EmbodiedTask, Measure, Action
+from habitat.core.embodied_task import EmbodiedTask, Measure, Action, SimulatorTaskAction
 from habitat.core.registry import registry
 from habitat.core.simulator import Simulator, Sensor, SensorTypes, Observations
 from habitat.core.utils import not_none_validator
@@ -47,40 +47,39 @@ class SequentialDataset(Dataset):
 
 @registry.register_task(name="SequentialNav-v0")
 class SequentialNavigationTask(NavigationTask):
-    is_stop_called: bool
-    _success_d: float
+    success_dist: float
 
     def __init__(self, *args: Any, config: Config, **kwargs: Any) -> None:
-        self.is_stop_called = False
-        self._success_d = config.SUCCESS_DISTANCE
+        self.success_dist = config.SUCCESS_DISTANCE
         super().__init__(*args, config=config, **kwargs)
 
     def reset(self, episode: SequentialEpisode) -> Observations:
-        self.is_stop_called = False
         episode._current_step_index = 0
         return super().reset(episode)
 
-    def _is_on_last_step(self, episode: SequentialEpisode) -> bool:
-        return episode._current_step_index == len(episode.steps) - 1
-
     def _check_episode_is_active(self, *args: Any, episode: SequentialEpisode,
                                  **kwargs: Any) -> bool:
-        if self.is_stop_called:
-            if self._is_on_last_step(episode):
-                return False
-            else:
-                ag_pos = self._sim.get_agent_state().position
-                step = episode.steps[episode._current_step_index]
-                d = self._sim.geodesic_distance(ag_pos, [goal.position for goal in step.goals])
-                if d <= self._success_d or any(goal.radius is not None and d <= goal.radius
-                                               for goal in step.goals):
-                    episode._current_step_index += 1
-                    self.is_stop_called = False
-                    return True
-                else:
-                    return False
+        return 0 <= episode._current_step_index < episode.num_steps
+
+
+@registry.register_task_action
+class FoundAction(SimulatorTaskAction):
+    name: str = "FOUND"
+    _current_episode: Optional[SequentialEpisode] = None
+
+    def reset(self, episode: SequentialEpisode, task: SequentialNavigationTask) -> None:
+        self._current_episode = episode
+
+    def step(self, *args: Any, task: SequentialNavigationTask, **kwargs: Any) -> Observations:
+        step = self._current_episode.steps[self._current_episode._current_step_index]
+        pos = self._sim.get_agent_state().position
+        d = self._sim.geodesic_distance(pos, [goal.position for goal in step.goals])
+        if d <= task.success_dist or any(goal.radius is not None and d <= goal.radius
+                                         for goal in step.goals):
+            self._current_episode._current_step_index += 1
         else:
-            return True
+            self._current_episode._current_step_index = -1
+        return self._sim.get_observations_at()
 
 
 def make_sequential(base_sensor_cls, *, name=None):
