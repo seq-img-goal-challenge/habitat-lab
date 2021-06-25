@@ -148,9 +148,12 @@ def test_sequential_pointgoal():
     from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
     from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
 
-    cfg = get_config(opts=["TASK.TYPE", "SequentialNav-v0",
-                           "TASK.POSSIBLE_ACTIONS", "['FOUND', 'MOVE_FORWARD', 'TURN_LEFT', 'TURN_RIGHT']",
-                           "TASK.SENSORS", "['SEQUENTIAL_POINTGOAL_SENSOR']"])
+    cfg = get_config()
+    cfg.TASK.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.SENSORS = ["SEQUENTIAL_POINTGOAL_SENSOR"]
+    cfg.TASK.freeze()
     with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
         sim.seed(123456)
         episode = _make_test_episode(sim)
@@ -181,17 +184,58 @@ def test_sequential_pointgoal():
         cfg.TASK.SEQUENTIAL_POINTGOAL_SENSOR.SEQUENTIAL_MODE = "SUFFIX"
         cfg.TASK.SEQUENTIAL_POINTGOAL_SENSOR.freeze()
         task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
-        task.reset(episode)
         follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
         while episode._current_step_index != 2:
             goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
             a = follower.get_next_action(goal_pos)
             obs = task.step({"action": a}, episode)
         assert obs["pointgoal"].shape == (episode.num_steps, 3)
+        for o, step in zip(obs["pointgoal"], episode.steps[episode._current_step_index:]):
+            vec = np.array(step.goals[0].position) - episode.start_position
+            assert np.allclose(o, vec)
+        pad_len = episode.num_steps - episode._current_step_index
+        assert np.all(obs["pointgoal"][-pad_len:] == 0)
 
 
 def test_sequential_online_pointgoal():
-    pass
+    import quaternion
+
+    from habitat.core.registry import registry
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+
+
+    cfg = get_config()
+    cfg.TASK.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.SENSORS = ["SEQUENTIAL_ONLINE_POINTGOAL_SENSOR"]
+    cfg.TASK.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(456123)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
+        for _ in range(6):
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            a = follower.get_next_action(goal_pos)
+            obs = task.step({"action": a}, episode)
+        assert "pointgoal_with_gps_compass" in obs
+        assert isinstance(obs["pointgoal_with_gps_compass"], np.ndarray)
+        assert obs["pointgoal_with_gps_compass"].shape == (episode.num_steps, 2)
+        s = sim.get_agent_state()
+        for (r, phi), step in zip(obs["pointgoal_with_gps_compass"], episode.steps):
+            vec = step.goals[0].position - s.position
+            vec = (s.rotation.inverse() * np.quaternion(0, *vec) * s.rotation).vec
+            assert np.isclose(np.linalg.norm(vec), r)
+            assert np.isclose(np.arctan2(-vec[0], -vec[2]), phi)
 
 
 def test_sequential_top_down_map():
