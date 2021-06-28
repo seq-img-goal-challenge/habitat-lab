@@ -444,8 +444,72 @@ def test_spl():
 
 
 def test_progress():
-    pass
+    from habitat.core.registry import registry
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+
+    cfg = get_config()
+    cfg.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.MEASUREMENTS = ["PROGRESS"]
+    cfg.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(15973)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
+        task.measurements.reset_measures(episode=episode, task=task)
+        m = task.measurements.get_metrics()
+        assert "progress" in m
+        assert isinstance(m["progress"], float)
+        while task.is_episode_active:
+            assert m["progress"] == episode._current_step_index / episode.num_steps
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            a = follower.get_next_action(goal_pos)
+            task.step({"action": a}, episode)
+            task.measurements.update_measures(episode=episode, action={"action": a}, task=task)
+            m = task.measurements.get_metrics()
+        assert m["progress"] == 1.0
 
 
 def test_ppl():
-    pass
+    from habitat.core.registry import registry
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+
+    cfg = get_config()
+    cfg.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.MEASUREMENTS = ["PROGRESS", "PPL"]
+    cfg.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(15973)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
+        task.measurements.reset_measures(episode=episode, task=task)
+        m = task.measurements.get_metrics()
+        assert "ppl" in m
+        assert isinstance(m["ppl"], float)
+        while task.is_episode_active:
+            assert 0.0 <= m["ppl"] <= episode._current_step_index / episode.num_steps
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            a = follower.get_next_action(goal_pos)
+            task.step({"action": a}, episode)
+            task.measurements.update_measures(episode=episode, action={"action": a}, task=task)
+            m = task.measurements.get_metrics()
+        assert 0.0 < m["ppl"] <= 1.0
