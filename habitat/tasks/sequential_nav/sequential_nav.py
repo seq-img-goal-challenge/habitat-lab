@@ -260,7 +260,8 @@ class Progress(Measure):
         self._metric = 0.0
 
     def update_metric(self, *args: Any, episode: SequentialEpisode, **kwargs: Any) -> None:
-        self._metric = max(0.0, episode._current_step_index / episode.num_steps)
+        if episode._current_step_index > 0:
+            self._metric = episode._current_step_index / episode.num_steps
 
 
 @registry.register_measure
