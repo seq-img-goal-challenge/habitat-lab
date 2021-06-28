@@ -100,8 +100,11 @@ def test_sequential_nav_task():
     from habitat.tasks.nav.nav import NavigationGoal
     from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
 
-    cfg = get_config(opts=["TASK.TYPE", "SequentialNav-v0",
-                           "TASK.POSSIBLE_ACTIONS", "['FOUND', 'MOVE_FORWARD', 'TURN_LEFT', 'TURN_RIGHT']"])
+    cfg = get_config()
+    cfg.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.freeze()
     with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
         sim.seed(123456)
         episode = _make_test_episode(sim)
@@ -239,7 +242,56 @@ def test_sequential_online_pointgoal():
 
 
 def test_sequential_top_down_map():
-    pass
+    from habitat.core.registry import registry
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+    from habitat.utils.visualizations.maps import to_grid, MAP_TARGET_POINT_INDICATOR
+
+    cfg = get_config()
+    cfg.TASK.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.MEASUREMENTS = ["SEQUENTIAL_TOP_DOWN_MAP"]
+    cfg.TASK.SEQUENTIAL_TOP_DOWN_MAP.DRAW_SHORTEST_PATH = False
+    cfg.TASK.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(456123)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        task.reset(episode)
+        task.measurements.reset_measures(episode=episode, task=task)
+        task.step({"action": 1}, episode)
+        for _ in range(2):
+            task.step({"action": 2}, episode)
+        task.measurements.update_measures(episode=episode, action={"action": 1}, task=task)
+        m = task.measurements.get_metrics()
+        assert "top_down_map" in m
+        assert isinstance(m["top_down_map"], dict)
+        assert all(key in m["top_down_map"] for key in ("map", "fog_of_war_mask",
+                                                        "agent_map_coord", "agent_angle"))
+        topdown_map = m["top_down_map"]["map"]
+        assert isinstance(topdown_map, np.ndarray)
+        mask = m["top_down_map"]["fog_of_war_mask"]
+        assert isinstance(mask, np.ndarray)
+        assert mask.shape == topdown_map.shape
+        ij = m["top_down_map"]["agent_map_coord"]
+        assert isinstance(ij, tuple)
+        assert len(ij) == 2
+        assert all(isinstance(x, int) for x in ij)
+        assert all(0 <= x < s for x, s in zip(ij, topdown_map.shape))
+        phi = m["top_down_map"]["agent_angle"]
+        assert isinstance(phi, float)
+        assert 0 <= phi <= 2 * np.pi
+
+        for step in episode.steps:
+            x, _, z = step.goals[0].position
+            ij = to_grid(z, x, topdown_map.shape, sim)
+            assert topdown_map[ij] == MAP_TARGET_POINT_INDICATOR
 
 
 def test_distance_to_next_goal():
