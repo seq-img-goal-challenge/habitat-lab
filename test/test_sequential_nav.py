@@ -24,7 +24,7 @@ def test_registration():
     assert registry.get_measure("DistanceToNextGoal") is DistanceToNextGoal
     assert registry.get_measure("SequentialSuccess") is SequentialSuccess
     assert registry.get_measure("SequentialSPL") is SequentialSPL
-    assert registry.get_measure("Progress") is Progress 
+    assert registry.get_measure("Progress") is Progress
     assert registry.get_measure("PPL") is PPL
 
 
@@ -96,8 +96,6 @@ def test_sequential_nav_task():
     from habitat.config.default import get_config
     from habitat.sims import make_sim
     from habitat.tasks import make_task
-    from habitat.tasks.sequential_nav.sequential_nav import SequentialEpisode, SequentialStep
-    from habitat.tasks.nav.nav import NavigationGoal
     from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
 
     cfg = get_config()
@@ -108,7 +106,6 @@ def test_sequential_nav_task():
     with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
         sim.seed(123456)
         episode = _make_test_episode(sim)
-
         task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim)
 
         # Expected progression in sequence when stop is called at each goal
@@ -131,7 +128,7 @@ def test_sequential_nav_task():
         assert episode._current_step_index == 0
         task.step({"action": 0}, episode)
         assert episode._current_step_index == -1
-        assert not task.is_episode_active 
+        assert not task.is_episode_active
 
         # Early termination when stop is called and a goal is in reach but not the correct one
         task.reset(episode)
@@ -141,6 +138,51 @@ def test_sequential_nav_task():
             a = follower.get_next_action(goal_pos)
             task.step({"action": a}, episode)
         assert episode._current_step_index == -1
+
+
+def test_gps_and_compass():
+    import quaternion
+
+    from habitat.core.registry import registry
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+
+    cfg = get_config()
+    cfg.TASK.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.SENSORS = ["GPS_SENSOR", "COMPASS_SENSOR"]
+    cfg.TASK.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(789123)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        obs = task.reset(episode)
+        assert all(key in obs for key in ("gps", "compass"))
+        assert isinstance(obs["gps"], np.ndarray)
+        assert obs["gps"].shape == (2,)
+        assert obs["compass"].shape == (1,)
+        phi, = obs["compass"]
+        assert 0 <= phi <= 2*np.pi
+
+        while task.is_episode_active:
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            a = follower.get_next_action(goal_pos)
+            obs = task.step({"action": a}, episode)
+            rot = np.quaternion(episode.start_rotation[3], *episode.start_rotation[:3])
+            s = sim.get_agent_state()
+            vec = s.position - episode.start_position
+            x, _, z = (rot.inverse() * np.quaternion(0, *vec) * rot).vec
+            assert np.allclose(obs["gps"], [-z, x], rtol=0.0001)
+            r = rot.inverse() * s.rotation
+            phi = 2 * np.arctan(r.y / r.w) if r.w != 0 else np.pi
+            assert np.isclose(obs["compass"], phi)
 
 
 def test_sequential_pointgoal():
@@ -265,10 +307,9 @@ def test_sequential_top_down_map():
         task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
         task.reset(episode)
         task.measurements.reset_measures(episode=episode, task=task)
-        task.step({"action": 1}, episode)
-        for _ in range(2):
-            task.step({"action": 2}, episode)
-        task.measurements.update_measures(episode=episode, action={"action": 1}, task=task)
+        for a in (1, 2 ,2):
+            task.step({"action": a}, episode)
+            task.measurements.update_measures(episode=episode, action={"action": a}, task=task)
         m = task.measurements.get_metrics()
         assert "top_down_map" in m
         assert isinstance(m["top_down_map"], dict)
@@ -295,15 +336,111 @@ def test_sequential_top_down_map():
 
 
 def test_distance_to_next_goal():
-    pass
+    from habitat.core.registry import registry
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+
+    cfg = get_config()
+    cfg.TASK.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.MEASUREMENTS = ["DISTANCE_TO_NEXT_GOAL"]
+    cfg.TASK.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(456123)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
+        task.measurements.reset_measures(episode=episode, task=task)
+        m = task.measurements.get_metrics()
+        assert "distance_to_next_goal" in m
+        assert isinstance(m["distance_to_next_goal"], float)
+        while task.is_episode_active:
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            d = sim.geodesic_distance(sim.get_agent_state().position, goal_pos)
+            assert np.isclose(m["distance_to_next_goal"], d)
+            a = follower.get_next_action(goal_pos)
+            task.step({"action": a}, episode)
+            task.measurements.update_measures(episode=episode, action={"action": a}, task=task)
+            m = task.measurements.get_metrics()
 
 
-def test_sequential_success():
-    pass
+def test_success():
+    from habitat.core.registry import registry
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+
+    cfg = get_config()
+    cfg.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.MEASUREMENTS = ["DISTANCE_TO_NEXT_GOAL", "SEQUENTIAL_SUCCESS"]
+    cfg.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(789456)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
+        task.measurements.reset_measures(episode=episode, task=task)
+        m = task.measurements.get_metrics()
+        assert "seq_success" in m
+        assert isinstance(m["seq_success"], float)
+        while task.is_episode_active:
+            assert m["seq_success"] == 0.0
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            a = follower.get_next_action(goal_pos)
+            task.step({"action": a}, episode)
+            task.measurements.update_measures(episode=episode, action={"action": a}, task=task)
+            m = task.measurements.get_metrics()
+        assert m["seq_success"] == 1.0
 
 
-def test_sequential_spl():
-    pass
+def test_spl():
+    from habitat.core.registry import registry
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+
+    cfg = get_config()
+    cfg.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.MEASUREMENTS = ["DISTANCE_TO_NEXT_GOAL", "SEQUENTIAL_SUCCESS", "SEQUENTIAL_SPL"]
+    cfg.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(789456)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
+        task.measurements.reset_measures(episode=episode, task=task)
+        m = task.measurements.get_metrics()
+        assert "seq_spl" in m
+        assert isinstance(m["seq_spl"], float)
+        while task.is_episode_active:
+            assert m["seq_spl"] == 0.0
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            a = follower.get_next_action(goal_pos)
+            task.step({"action": a}, episode)
+            task.measurements.update_measures(episode=episode, action={"action": a}, task=task)
+            m = task.measurements.get_metrics()
+        assert 0.0 < m["seq_spl"] <= 1.0
 
 
 def test_progress():
