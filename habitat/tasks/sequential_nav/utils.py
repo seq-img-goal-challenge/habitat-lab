@@ -4,6 +4,11 @@ from collections import OrderedDict
 import numpy as np
 from gym import Space, spaces
 
+from habitat.config.default import Config
+from habitat.core.registry import registry
+from habitat.core.simulator import Simulator
+from habitat.tasks.nav.nav import NavigationEpisode
+
 
 def _extend_space_shape_recursive(space: Space, seq_len: int, pad_val: Any) -> Space:
     if isinstance(space, spaces.Discrete):
@@ -49,3 +54,73 @@ def _pack_obs_seq_recursive(obs_seq: List[Any], seq_len: int, pad_val: Any) -> A
         raise RuntimeError("Observations of type '{}' ".format(type(step_obs[0])) \
                            + "cannot be packed as sequences.")
 
+
+def make_sequential(base_sensor_cls, *, name=None):
+    if name is None:
+        name = "Sequential" + base_sensor_cls.__name__
+
+    @registry.register_sensor(name=name)
+    class SequentialSensor(base_sensor_cls):
+        _max_seq_len: int
+        _pad_val: int
+        _seq_mode: str
+
+        def __init__(self, *args: Any, sim: Simulator, config: Config,
+                     dataset: "SequentialDataset", **kwargs: Any) -> None:
+            self._max_seq_len = dataset.get_max_sequence_len()
+            self._pad_val = config.PADDING_VALUE
+            self._seq_mode = config.SEQUENTIAL_MODE
+            super().__init__(*args, sim=sim, config=config, dataset=dataset, **kwargs)
+
+        def _get_observation_space(self, *args: Any, **kwargs: Any) -> Space:
+            src_space = super()._get_observation_space(*args, **kwargs)
+            if self.config.SEQUENTIAL_MODE == "MYOPIC":
+                return src_space
+            elif isinstance(src_space, spaces.Box):
+                extended_shape = (self._max_seq_len,) + src_space.shape
+                low = np.broadcast_to(src_space.low, extended_shape)
+                high = np.broadcast_to(src_space.high, extended_shape)
+                return spaces.Box(low=np.minimum(low, self._pad_val),
+                                  high=np.maximum(high, self._pad_val),
+                                  dtype=src_space.dtype)
+            else:
+                raise NotImplementedError(f"Cannot make sequential sensor" \
+                        + "for observation space of type '{type(src_space)}'")
+
+        def _get_observation_for_step(self, episode: "SequentialEpisode", step_index: int,
+                                      *args: Any, **kwargs: Any) -> Any:
+            step = episode.steps[step_index]
+            step_id = f"{episode.episode_id}_{step_index}"
+            step_as_episode = NavigationEpisode(episode_id=step_id,
+                                                scene_id=episode.scene_id,
+                                                start_position=episode.start_position,
+                                                start_rotation=episode.start_rotation,
+                                                goals=step.goals)
+            for k, v in vars(episode).items():
+                if k not in vars(step_as_episode):
+                    setattr(step_as_episode, k, v)
+            for k, v in vars(step).items():
+                if k not in vars(step_as_episode):
+                    setattr(step_as_episode, k, v)
+            return super().get_observation(*args, episode=step_as_episode, **kwargs)
+
+        def get_observation(self, *args: Any, episode: "SequentialEpisode",
+                            **kwargs: Any) -> Any:
+            if self._seq_mode == "MYOPIC":
+                return self._get_observation_for_step(episode, episode._current_step_index,
+                                                      *args, **kwargs)
+            if self._seq_mode == "PREFIX":
+                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
+                           for idx in range(0, episode._current_step_index + 1)]
+            elif self._seq_mode == "SUFFIX":
+                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
+                           for idx in range(episode._current_step_index, episode.num_steps)]
+            elif self._seq_mode == "FULL":
+                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
+                           for idx in range(0, episode.num_steps)]
+            obs_seq = np.stack(obs_seq, 0)
+            pad_len = self._max_seq_len - obs_seq.shape[0]
+            pad = np.full((pad_len,) + obs_seq.shape[1:], self._pad_val)
+            return np.concatenate([obs_seq, pad], 0)
+
+    return SequentialSensor

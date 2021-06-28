@@ -52,4 +52,4 @@ def test_task():
     obs = env.reset()
     m = env.task.measurements.get_metrics()
     assert ["objectgoal_appearance", "objectgoal_category", "rgb"] == sorted(obs.keys())
-    assert ["distance_to_next_goal", "sequential_spl", "sequential_success"] == sorted(m.keys())
+    assert ["distance_to_next_goal", "seq_spl", "seq_success"] == sorted(m.keys())
