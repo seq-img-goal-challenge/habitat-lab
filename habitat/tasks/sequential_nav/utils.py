@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 from collections import OrderedDict
 
 import numpy as np
@@ -64,12 +64,14 @@ def make_sequential(base_sensor_cls, *, name=None):
         _max_seq_len: int
         _pad_val: int
         _seq_mode: str
+        _prv_step_idx: Optional[int]
 
         def __init__(self, *args: Any, sim: Simulator, config: Config,
                      dataset: "SequentialDataset", **kwargs: Any) -> None:
             self._max_seq_len = dataset.get_max_sequence_len()
             self._pad_val = config.PADDING_VALUE
             self._seq_mode = config.SEQUENTIAL_MODE
+            self._prv_step_idx = None
             super().__init__(*args, sim=sim, config=config, dataset=dataset, **kwargs)
 
         def _get_observation_space(self, *args: Any, **kwargs: Any) -> Space:
@@ -106,19 +108,26 @@ def make_sequential(base_sensor_cls, *, name=None):
 
         def get_observation(self, *args: Any, episode: "SequentialEpisode",
                             **kwargs: Any) -> Any:
+            step_idx = episode._current_step_index
+            if step_idx < 0 or step_idx >= episode.num_steps:
+                if self._prv_step_idx is None:
+                    raise ValueError("Invalid step index encountered" \
+                                     + "while getting the observation of a sequential sensor.")
+                else:
+                    step_idx = self._prv_step_idx
+            self._prv_step_idx = step_idx
+
             if self._seq_mode == "MYOPIC":
-                return self._get_observation_for_step(episode, episode._current_step_index,
-                                                      *args, **kwargs)
+                return self._get_observation_for_step(episode, step_idx, *args, **kwargs)
+
             if self._seq_mode == "PREFIX":
-                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
-                           for idx in range(0, episode._current_step_index + 1)]
+                indices = range(0, step_idx + 1)
             elif self._seq_mode == "SUFFIX":
-                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
-                           for idx in range(episode._current_step_index, episode.num_steps)]
+                indices = range(step_idx, episode.num_steps)
             elif self._seq_mode == "FULL":
-                obs_seq = [self._get_observation_for_step(episode, idx, *args, **kwargs)
-                           for idx in range(0, episode.num_steps)]
-            obs_seq = np.stack(obs_seq, 0)
+                indices = range(0, episode.num_steps)
+            obs_seq = np.stack([self._get_observation_for_step(episode, idx, *args, **kwargs)
+                                for idx in indices], 0)
             pad_len = self._max_seq_len - obs_seq.shape[0]
             pad = np.full((pad_len,) + obs_seq.shape[1:], self._pad_val)
             return np.concatenate([obs_seq, pad], 0)

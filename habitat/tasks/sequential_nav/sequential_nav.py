@@ -269,12 +269,14 @@ class PPL(Measure):
     _sim: Simulator
     _shortest_dist: List[float]
     _cumul_dist: float
+    _last_step_idx: int
     _last_pos: Optional[np.ndarray]
 
     def __init__(self, *args: Any, sim: Simulator, **kwargs: Any) -> None:
         self._sim = sim
         self._shortest_dist = []
         self._cumul_dist = 0.0
+        self._last_step_idx = 0
         self._last_pos = None
         self._metric = 0.0
         super().__init__(*args, sim=sim, **kwargs)
@@ -303,18 +305,20 @@ class PPL(Measure):
         task.measurements.check_measure_dependencies(self.uuid, [Progress.cls_uuid])
         self._shortest_dist = self._compute_shortest_dist(episode)
         self._cumul_dist = 0.0
+        self._last_step_idx = 0
         self._last_pos = np.array(self._sim.get_agent_state().position)
         self._metric = 0.0
 
     def update_metric(self, *args: Any, episode: SequentialEpisode,
                       task: SequentialNavigationTask, **kwargs: Any) -> None:
         pos = np.array(self._sim.get_agent_state().position)
-        if np.allclose(self._last_pos, pos):
+        k = episode._current_step_index
+        if self._last_step_idx == k and np.allclose(self._last_pos, pos):
             return
         self._cumul_dist += np.linalg.norm(pos - self._last_pos)
-        k = episode._current_step_index
         if k > 0:
             p = task.measurements.measures[Progress.cls_uuid].get_metric()
             d = self._shortest_dist[k - 1]
             self._metric = p * d / max(self._cumul_dist, d)
+        self._last_step_idx = k
         self._last_pos = pos
