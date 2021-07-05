@@ -64,8 +64,11 @@ EXCLUDED = {
         #"car/63f6a2c7ee7c667ba0b677182d16c198",
         #"car/8aa9a549372e44143765ee7ffdfef49f",
         #"car/857a3a01bd311511f200a72c9245aee7",
+        #"car/3ac664a7486a0bdff200a72c9245aee7"
         #"car/31055873d40dc262c7477eb29831a699",
         #"car/5721c147ce05684d613dc416ee51531e",
+        #"car/706671ef8c7b5e28a6c2c95b41a5446d",
+        #"car/381332377d8aff57573c99f10261e25a",
         #"car/4e9a489d830e285b59139efcde1fedcb",
         #"car/490812763fa965b8473f10e6caaeca56",
         #"car/1724ae84377e0b9ba6c2c95b41a5446d",
@@ -209,6 +212,7 @@ def main():
             for cat, tmpl_pool in pool.items():
                 for tmpl_id in tmpl_pool:
                     short_tmpl_id = tmpl_id[len(OBJECTS_DIR):-len(OBJECTS_EXT)]
+                    progress.set_description(short_tmpl_id)
                     if short_tmpl_id not in EXCLUDED:
                         conn.send(tmpl_id)
                         for t in range(N_RETRIES):
