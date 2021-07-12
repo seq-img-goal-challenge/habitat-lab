@@ -31,10 +31,11 @@ def test_generate_dataset():
             import generate_sequential_objectnav_dataset
 
     generate_sequential_objectnav_dataset("configs/tasks/pointnav_gibson.yaml", [
+        "SIMULATOR.AGENT_0.SENSORS", "['DEPTH_SENSOR']",
         "DATASET.TYPE", "SequentialObjectNav-v0",
         "DATASET.DATA_PATH", "data/datasets/sequential_objectnav/testgen/{split}/{split}.json.gz",
-    ], 10, 2, 3, 5, 1.0, "YAXIS", "OVERRIDE",
-    "data/scene_datasets/gibson/", "data/object_datasets/test_objects/", 123456)
+    ], 10, 2, 3, 5, "VERTICAL", "OVERRIDE",
+    "gibson", "shapenet_core_v2", 123685)
 
 
 def test_task():

@@ -64,25 +64,28 @@ def test_generate_episode():
 
     cfg = habitat.get_config().SIMULATOR
     cfg.defrost()
-    cfg.SCENE = "data/scene_datasets/gibson/Ackermanville.glb"
+    cfg.SCENE = "data/scene_datasets/gibson/Dansville.glb"
+    cfg.AGENT_0.SENSORS = ["DEPTH_SENSOR"]
     cfg.freeze()
     sim = habitat.sims.make_sim(cfg.TYPE, config=cfg)
     object_pool, category_index_map = create_object_pool("data/object_datasets/test_objects")
 
-    SEED = 123456
+    SEED = 1234567
     sim.seed(SEED)
+
     rng = np.random.default_rng(SEED)
-    for i, rot in enumerate(("DISABLE", "YAXIS", "3D")):
+    for ep_idx, rot in enumerate(("DISABLE", "VERTICAL", "3D")):
         episode = generate_spawned_objectnav_episode(sim, object_pool, category_index_map,
-                                                     "ep{}".format(i), rng, 2, 1.0, rot)
-        assert episode.episode_id == "ep{}".format(i)
+                                                     "ep{}".format(ep_idx), rng, 2, rot)
+        assert episode.episode_id == "ep{}".format(ep_idx)
         assert episode.scene_id == cfg.SCENE
         assert sim.island_radius(episode.start_position) > 0.2
         assert episode.object_category in {"box", "chair", "sphere", "donut"}
         assert episode.object_category_index == category_index_map[episode.object_category]
         assert 1 <= len(episode.goals) <= 2
-        assert all(np.isfinite(sim.geodesic_distance(episode.start_position, goal.position))
-                   for goal in episode.goals)
+        assert all(len(goal.view_points) > 0 for goal in episode.goals)
+        assert all(np.isfinite(sim.geodesic_distance(episode.start_position, view_pt.position))
+                   for goal in episode.goals for view_pt in goal.view_points)
 
 
 def test_generate_dataset():
@@ -90,16 +93,16 @@ def test_generate_dataset():
             import generate_spawned_objectnav_dataset
 
     PATH = "data/datasets/spawned_objectnav/test_gen_dataset/{split}/{split}.json.gz"
-    EXTRA_CONFIG = ["DATASET.TYPE", "SpawnedObjectNav-v0",
+    EXTRA_CONFIG = ["SIMULATOR.AGENT_0.SENSORS", "['DEPTH_SENSOR']",
+                    "DATASET.TYPE", "SpawnedObjectNav-v0",
                     "DATASET.DATA_PATH", PATH,
                     "DATASET.SPLIT", "test"]
     NUM_EPISODES = 3
     MAX_GOALS = 4
-    GOAL_RADIUS = 1.0
     OBJECT_ROT = "3D"
     SEED = 123456
     generate_spawned_objectnav_dataset("configs/tasks/pointnav.yaml", EXTRA_CONFIG,
-                                       NUM_EPISODES, MAX_GOALS, GOAL_RADIUS, OBJECT_ROT,
+                                       NUM_EPISODES, MAX_GOALS, OBJECT_ROT,
                                        "OVERRIDE", "gibson", "test_objects", SEED)
     assert os.path.isfile(PATH.format(split="test"))
 
@@ -162,12 +165,11 @@ def test_appearance_sensor():
 
     sensor_cfg = habitat.Config()
     sensor_cfg.TYPE = "SpawnedObjectGoalAppearanceSensor"
-    sensor_cfg.OUT_OF_CONTEXT = False
+    sensor_cfg.OUT_OF_CONTEXT = True
     sensor_cfg.OUT_OF_CONTEXT_POS = [0.0, 50.0, 0.0]
     sensor_cfg.MAX_VIEW_DISTANCE = 2.0
     sensor_cfg.MIN_VIEW_DISTANCE = 0.5
-    sensor_cfg.ISLAND_RADIUS = 0.3
-    sensor_cfg.RANDOM_OBJECT_ORIENTATION = "DISABLE"
+    sensor_cfg.RANDOM_OBJECT_ROTATION = "DISABLE"
     sensor_cfg.NUM_VIEWS = 5
     sensor_cfg.freeze()
     sensor_cls = habitat.registry.get_sensor(sensor_cfg.TYPE)
@@ -182,8 +184,8 @@ def test_appearance_sensor():
         tmpl_mngr = sim.get_object_template_manager()
         for path in glob.glob("data/object_datasets/test_objects/**/*.object_config.json", recursive=True):
             goal = SpawnedObjectGoal(position=sim.sample_navigable_point(),
-                                     orientation=[0.0, 0.0, 0.0, 1.0],
-                                     radius=1.0,
+                                     rotation=[0.0, 0.0, 0.0, 1.0],
+                                     view_points=[],
                                      object_template_id=path)
             mngr_id, = tmpl_mngr.load_configs(goal.object_template_id)
             goal._spawned_object_id = sim.add_object(mngr_id)
@@ -222,7 +224,7 @@ def test_task():
     cfg.TASK.OBJECTGOAL_APPEARANCE.MAX_VIEW_DISTANCE = 2.0
     cfg.TASK.OBJECTGOAL_APPEARANCE.MIN_VIEW_DISTANCE = 0.5
     cfg.TASK.OBJECTGOAL_APPEARANCE.ISLAND_RADIUS = 0.2
-    cfg.TASK.OBJECTGOAL_APPEARANCE.RANDOM_OBJECT_ORIENTATION = "DISABLE"
+    cfg.TASK.OBJECTGOAL_APPEARANCE.RANDOM_OBJECT_ROTATION = "DISABLE"
     cfg.TASK.OBJECTGOAL_APPEARANCE.NUM_VIEWS = 5
     cfg.TASK.freeze()
 

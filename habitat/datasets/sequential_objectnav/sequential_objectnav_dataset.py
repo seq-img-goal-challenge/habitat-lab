@@ -7,7 +7,7 @@ from habitat.datasets.pointnav.pointnav_dataset import DEFAULT_SCENE_PATH_PREFIX
 from habitat.datasets.spawned_objectnav.spawned_objectnav_dataset \
         import SpawnedObjectNavDatasetV0
 from habitat.datasets.spawned_objectnav.utils import find_scene_file, find_object_config_file
-from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal
+from habitat.tasks.nav.spawned_objectnav import ViewPoint, SpawnedObjectGoal
 from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNavStep, \
                                                               SequentialObjectNavEpisode
 
@@ -27,6 +27,8 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0):
             obj_tmpl_id = find_object_config_file(raw_dict["object_template_id"])
             raw_dict["object_template_id"] = obj_tmpl_id
             return SpawnedObjectGoal(**raw_dict)
+        elif "iou" in raw_dict:
+            return ViewPoint(**raw_dict)
         else:
             return raw_dict
 
