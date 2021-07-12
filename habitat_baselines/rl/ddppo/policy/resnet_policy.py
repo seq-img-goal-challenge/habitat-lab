@@ -7,6 +7,7 @@
 
 from typing import Dict, Tuple
 
+from math import ceil
 import numpy as np
 import torch
 from gym import spaces
@@ -94,14 +95,21 @@ class ResNetEncoder(nn.Module):
         super().__init__()
 
         if "rgb" in observation_space.spaces:
-            self._n_input_rgb = observation_space.spaces["rgb"].shape[2]
-            spatial_size = observation_space.spaces["rgb"].shape[0] // 2
+            h, w, c = observation_space.spaces["rgb"].shape
+            self._n_input_rgb = c
+            spatial_height = h // 2 # avg pool
+            spatial_width = w // 2 # avg pool
         else:
             self._n_input_rgb = 0
 
         if "depth" in observation_space.spaces:
-            self._n_input_depth = observation_space.spaces["depth"].shape[2]
-            spatial_size = observation_space.spaces["depth"].shape[0] // 2
+            h, w, c = observation_space.spaces["depth"].shape
+            self._n_input_depth = c
+            if self._n_input_rgb > 0:
+                assert spatial_height == h // 2 and spatial_width == w // 2
+            else:
+                spatial_height = h // 2 # avg pool
+                spatial_width = w // 2 # avg pool
         else:
             self._n_input_depth = 0
 
@@ -116,12 +124,15 @@ class ResNetEncoder(nn.Module):
             input_channels = self._n_input_depth + self._n_input_rgb
             self.backbone = make_backbone(input_channels, baseplanes, ngroups)
 
-            final_spatial = int(
-                spatial_size * self.backbone.final_spatial_compress
+            final_height = ceil(
+                    spatial_height * self.backbone.final_spatial_compress
+            )
+            final_width = ceil(
+                    spatial_width * self.backbone.final_spatial_compress
             )
             after_compression_flat_size = 2048
             num_compression_channels = int(
-                round(after_compression_flat_size / (final_spatial ** 2))
+                round(after_compression_flat_size / (final_height * final_width))
             )
             self.compression = nn.Sequential(
                 nn.Conv2d(
@@ -137,8 +148,8 @@ class ResNetEncoder(nn.Module):
 
             self.output_shape = (
                 num_compression_channels,
-                final_spatial,
-                final_spatial,
+                final_height,
+                final_width,
             )
 
     @property
