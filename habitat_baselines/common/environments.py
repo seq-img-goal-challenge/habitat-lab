@@ -10,10 +10,11 @@ in habitat. Customized environments should be registered using
 ``@baseline_registry.register_env(name="myEnv")` for reusability
 """
 
-from typing import Optional, Type
+from typing import Optional, Type, Tuple, Any
 
 import habitat
 from habitat import Config, Dataset
+from habitat.core.simulator import Observations
 from habitat_baselines.common.baseline_registry import baseline_registry
 
 
@@ -83,3 +84,54 @@ class NavRLEnv(habitat.RLEnv):
 
     def get_info(self, observations):
         return self.habitat_env.get_metrics()
+
+
+@baseline_registry.register_env(name="SequentialNavRLEnv")
+class SequentialNavRLEnv(NavRLEnv):
+    _seq_reward_measure_name: str
+    _prv_seq_measure: Any
+    _slack_r: float
+    _success_r: float
+
+    def __init__(self, config: Config, dataset: Optional[Dataset]=None) -> None:
+        self._seq_reward_measure_name = config.RL.SEQUENTIAL_REWARD_MEASURE
+        self._prv_seq_measure = None
+        self._slack_r = config.RL.SLACK_REWARD
+        self._success_r = config.RL.SUCCESS_REWARD
+        super().__init__(config, dataset)
+
+    def reset(self):
+        observations = super().reset()
+        self._prv_seq_measure = self._env.get_metrics()[self._seq_reward_measure_name]
+        return observations
+
+    def get_reward_range(self) -> Tuple[float, float]:
+        max_distance_delta = self._core_env_config.SIMULATOR.FORWARD_STEP_SIZE
+        max_progress_delta = 1.0
+        return (self._slack_r - max_distance_delta,
+                self._slack_r + self._success_r + max_distance_delta + max_progress_delta)
+
+    def get_reward(self, observations: Observations) -> float:
+        reward = self._rl_config.SLACK_REWARD
+        m = self._env.get_metrics()
+
+        progress_delta = m[self._seq_reward_measure_name] - self._prv_seq_measure
+        if progress_delta > 0: # Progress can only increase
+            reward += progress_delta
+            self._prv_seq_measure = cur_seq_measure
+            # Reset reward measure if some progress was made
+            self._previous_measure = cur_measure
+
+        # Assume reward measure is similar to a distance to goal
+        # hence, encourage a decrease in measure and penalize an increase
+        measure_delta = m[self._reward_measure_name] - self._previous_measure
+        reward -= measure_delta
+
+        # Add a sparse success reward
+        success = m[self._success_measure_name]
+        if success:
+            reward += self._rl_config.SUCCESS_REWARD
+        return reward
+
+    def get_done(self, observations: Observations) -> bool:
+        return self._env.episode_over
