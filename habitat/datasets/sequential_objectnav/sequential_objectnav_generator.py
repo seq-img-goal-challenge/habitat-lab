@@ -9,7 +9,7 @@ import numpy as np
 import habitat
 from habitat.core.simulator import Simulator
 from habitat.datasets.spawned_objectnav.spawned_objectnav_generator \
-        import create_object_pool, create_scene_pool, generate_spawned_objectgoal
+        import create_object_pool, create_scene_pool, generate_spawned_objectgoals
 from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNavStep, \
                                                               SequentialObjectNavEpisode
 
@@ -22,7 +22,6 @@ def generate_sequential_objectnav_episode(sim: Simulator,
                                           min_seq_len: int,
                                           max_seq_len: int,
                                           max_goals: int,
-                                          goal_radius: float,
                                           rotate_objects: str) -> SequentialObjectNavEpisode:
     start_pos = sim.sample_navigable_point()
     a = 2 * np.pi * rng.random()
@@ -31,17 +30,24 @@ def generate_sequential_objectnav_episode(sim: Simulator,
     step_count = rng.integers(min_seq_len, max_seq_len, endpoint=True)
     selected_categories = rng.choice(list(object_pool.items()), step_count, replace=False)
     steps = []
+    all_tmpl_ids = []
+    step_splits = []
     for category, tmpl_ids in selected_categories:
-        cat_index = category_index_map[category]
+        prv_len = len(all_tmpl_ids)
+        cat_idx = category_index_map[category]
         if len(tmpl_ids) > max_goals:
-            tmpl_ids = rng.choice(list(tmpl_ids), max_goals, replace=True)
-        goals = [generate_spawned_objectgoal(sim, start_pos, tmpl_id, rng,
-                                             max_goals, goal_radius, rotate_objects)
-                 for tmpl_id in tmpl_ids]
-        steps.append(SequentialObjectNavStep(object_category=category,
-                                             object_category_index=cat_index,
-                                             goals=goals))
+            all_tmpl_ids.extend(rng.choice(list(tmpl_ids), max_goals, replace=True))
+        else:
+            all_tmpl_ids.extend(list(tmpl_ids))
+        nxt_len = len(all_tmpl_ids)
+        step_splits.append((category, cat_idx, prv_len, nxt_len))
+        prv_len = nxt_len
 
+    goals = generate_spawned_objectgoals(sim, all_tmpl_ids, rotate_objects, start_pos, rng)
+    steps = [SequentialObjectNavStep(object_category=category,
+                                     object_category_index=cat_idx,
+                                     goals=goals[first:last])
+             for category, cat_idx, first, last in step_splits]
     return SequentialObjectNavEpisode(episode_id=ep_id,
                                       scene_id=sim.habitat_config.SCENE,
                                       start_position=start_pos,
@@ -51,8 +57,7 @@ def generate_sequential_objectnav_episode(sim: Simulator,
 
 def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[str],
                                           num_episodes:int, min_seq_len: int, max_seq_len: int,
-                                          max_goals: int, goal_radius: float,
-                                          rotate_objects: str, if_exist: str,
+                                          max_goals: int, rotate_objects: str, if_exist: str,
                                           scenes_dir: str, objects_dir: str,
                                           seed: Optional[int]=None) -> None:
     cfg = habitat.get_config(config_path, extra_config)
@@ -88,8 +93,7 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
                 episode = generate_sequential_objectnav_episode(sim, object_pool, cat_idx_map, 
                                                                 next(ep_id), rng,
                                                                 min_seq_len, max_seq_len,
-                                                                max_goals, goal_radius,
-                                                                rotate_objects)
+                                                                max_goals, rotate_objects)
                 new_episodes.append(episode)
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -103,7 +107,6 @@ _DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/pointnav_gibson.y
                                  "min_seq_len": 3,
                                  "max_seq_len": 8,
                                  "max_goals": 5,
-                                 "goal_radius": 1.0,
                                  "rotate_objects": "DISABLE",
                                  "if_exist": "ABORT",
                                  "scenes_dir": "data/scene_datasets/gibson",
@@ -118,7 +121,6 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
     parser.add_argument("--min-seq-len", "-k", type=int)
     parser.add_argument("--max-seq-len", "-l", type=int)
     parser.add_argument("--max-goals", "-m", type=int)
-    parser.add_argument("--goal-radius", "-r", type=float)
     parser.add_argument("--rotate-objects", choices=("DISABLE", "YAXIS", "3D"))
     parser.add_argument("--if-exist", choices=("ABORT", "OVERRIDE", "APPEND"))
     parser.add_argument("--scenes-dir")

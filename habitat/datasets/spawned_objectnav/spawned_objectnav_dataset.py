@@ -6,7 +6,8 @@ import habitat
 from habitat.core.registry import registry
 from habitat.datasets.pointnav.pointnav_dataset import PointNavDatasetV1
 from habitat.datasets.spawned_objectnav.utils import find_scene_file, find_object_config_file
-from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, SpawnedObjectNavEpisode
+from habitat.tasks.nav.spawned_objectnav import ViewPoint, SpawnedObjectGoal, \
+                                                SpawnedObjectNavEpisode
 
 
 @registry.register_dataset(name="SpawnedObjectNav-v0")
@@ -22,6 +23,8 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
             obj_tmpl_id = find_object_config_file(raw_dict["object_template_id"])
             raw_dict["object_template_id"] = obj_tmpl_id
             return SpawnedObjectGoal(**raw_dict)
+        elif "iou" in raw_dict:
+            return ViewPoint(**raw_dict)
         else:
             return raw_dict
 
