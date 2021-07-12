@@ -64,7 +64,7 @@ def construct_envs(
                 "No scenes to load, multiple process logic relies on being able to split scenes uniquely between processes"
             )
 
-        if len(scenes) < num_environments:
+        if 1 < len(scenes) < num_environments:
             raise RuntimeError(
                 "reduce the number of environments as there "
                 "aren't enough number of scenes.\n"
@@ -75,11 +75,14 @@ def construct_envs(
 
         random.shuffle(scenes)
 
-    scene_splits: List[List[str]] = [[] for _ in range(num_environments)]
-    for idx, scene in enumerate(scenes):
-        scene_splits[idx % len(scene_splits)].append(scene)
+    if len(scenes) == 1:
+        scene_splits = [[scenes[0]] for _ in range(num_environments)]
+    else:
+        scene_splits: List[List[str]] = [[] for _ in range(num_environments)]
+        for idx, scene in enumerate(scenes):
+            scene_splits[idx % len(scene_splits)].append(scene)
 
-    assert sum(map(len, scene_splits)) == len(scenes)
+        assert sum(map(len, scene_splits)) == len(scenes)
 
     for i in range(num_environments):
         proc_config = config.clone()
