@@ -171,7 +171,7 @@ def generate_spawned_objectgoals(sim: Simulator, template_ids: List[str],
                                  rotate_objects: str, start_pos: np.ndarray,
                                  rng: np.random.Generator) -> List[SpawnedObjectGoal]:
     distrib = SpawnPositionDistribution(sim)
-    positions = distrib.sample(len(template_ids), rng)
+    positions = distrib.sample_from_connected_component(len(template_ids), rng=rng)
     goals = spawn_objects(sim, template_ids, positions, rotate_objects, rng)
     recompute_navmesh_with_static_objects(sim)
     goals = find_view_points(sim, goals, start_pos)
