@@ -1,0 +1,14 @@
+SIMULATOR:
+    AGENT_0:
+        SENSORS: ["RGB_SENSOR", "DEPTH_SENSOR"]
+DATASET:
+    TYPE: "SpawnedObjectNav-v0"
+    DATA_PATH: "data/datasets/spawned_objectnav/unittest/{split}/{split}.json.gz"
+TASK:
+    TYPE: "SpawnedObjectNav-v0"
+    SUCCESS_DISTANCE: 1.0
+    SENSORS: ["SPAWNED_OBJECTGOAL_CATEGORY", "SPAWNED_OBJECTGOAL_APPEARANCE"]
+    GOAL_SENSOR_UUID: "objectgoal_appearance"
+    MEASUREMENTS: ["DISTANCE_TO_GOAL", "SUCCESS", "SPL"]
+    SUCCESS:
+        SUCCESS_DISTANCE: 1.0

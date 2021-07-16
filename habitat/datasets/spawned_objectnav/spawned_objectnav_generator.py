@@ -1,8 +1,8 @@
-from typing import Any, Optional, Tuple, List, Set, Dict
+from typing import Any, Optional, Tuple, List, Dict
 import argparse
+import enum
 import sys
 import os
-import collections
 import itertools
 import gzip
 
@@ -15,6 +15,8 @@ import habitat
 from habitat.core.simulator import Simulator
 from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, ViewPoint, \
                                                 SpawnedObjectNavEpisode
+from habitat.datasets.spawned_objectnav.spawned_objectnav_dataset \
+        import SpawnedObjectNavDatasetV0
 from habitat.datasets.spawned_objectnav.spawn_pos_distrib import SpawnPositionDistribution
 from habitat.datasets.spawned_objectnav.utils import DEFAULT_SCENE_PATH_PREFIX, \
                                                      DEFAULT_SCENE_PATH_EXT, \
@@ -24,55 +26,61 @@ from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
 
 
-def create_object_pool(objects_dir: str) -> Tuple[Dict[str, Set[str]], Dict[str, int]]:
-    cat_idx = itertools.count()
-    cat_idx_map = {}
-    if not os.path.isdir(objects_dir):
-        objects_dir = os.path.join(DEFAULT_OBJECT_PATH_PREFIX, objects_dir)
-    pool = collections.defaultdict(set)
-    for entry in os.scandir(objects_dir):
-        if entry.is_dir():
-            category = entry.name
-            if category not in cat_idx_map:
-                cat_idx_map[category] = next(cat_idx)
-            for sub_entry in os.scandir(entry.path):
-                if sub_entry.is_file() and sub_entry.name.endswith(DEFAULT_OBJECT_PATH_EXT):
-                    tmpl_id = sub_entry.path
-                    pool[category].add(tmpl_id)
-        elif entry.is_file() and entry.name.endswith(DEFAULT_OBJECT_PATH_EXT):
-            category = entry.name[:-len(DEFAULT_OBJECT_PATH_EXT)]
-            if category not in cat_idx_map:
-                cat_idx_map[category] = next(cat_idx)
-            tmpl_id = entry.path
-            pool[category].add(tmpl_id)
-    return pool, cat_idx_map
+class ObjectPoolCategory:
+    name: str
+    index: int
+    templates: List[str]
+
+    def __init__(self, name, index, templates):
+        self.name = name
+        self.index = index
+        self.templates = sorted(templates)
+
+    def __lt__(self, other):
+        return self.name < other.name
+
+    def __iter__(self):
+        yield self.name
+        yield self.index
+        yield self.templates
 
 
-def create_scene_pool(scenes_dir: str) -> Set[str]:
-    pool = set()
-    if not os.path.isdir(scenes_dir):
-        scenes_dir = os.path.join(DEFAULT_SCENE_PATH_PREFIX, scenes_dir)
-    for entry in os.scandir(scenes_dir):
-        if entry.is_file() and entry.name.endswith(DEFAULT_SCENE_PATH_EXT):
-            pool.add(entry.path)
-    return pool
+def create_object_pool(objects_dir: str) -> List[ObjectPoolCategory]:
+    return sorted(ObjectPoolCategory(
+        dir_entry.name, i,
+        sorted(entry.path for entry in os.scandir(dir_entry.path)
+               if entry.is_file() and entry.name.endswith(DEFAULT_OBJECT_PATH_EXT))
+    ) for i, dir_entry in enumerate(os.scandir(objects_dir)) if dir_entry.is_dir())
 
 
-def spawn_objects(sim: Simulator, template_ids: List[str],
-                  positions: np.ndarray, rotate_objects: str="DISABLE",
-                  rng: Optional[np.random.Generator]=None) -> None:
+def create_scene_pool(scenes_dir: str) -> List[str]:
+    return sorted(entry.path for entry in os.scandir(scenes_dir)
+                  if entry.is_file() and entry.name.endswith(DEFAULT_SCENE_PATH_EXT))
+
+
+class ObjectRotation(enum.Enum):
+    FIXED = enum.auto()
+    VERTICAL = enum.auto()
+    FREE = enum.auto()
+
+
+def spawn_objects(sim: Simulator,
+                  template_ids: List[str],
+                  positions: np.ndarray,
+                  rotate_objects: ObjectRotation=ObjectRotation.FIXED,
+                  rng: Optional[np.random.Generator]=None) -> List[SpawnedObjectGoal]:
     num_objects = len(template_ids)
     mngr = sim.get_object_template_manager()
 
-    if rotate_objects == "DISABLE":
+    if rotate_objects is ObjectRotation.FIXED:
         rotations = [mn.Quaternion.identity_init() for _ in range(num_objects)]
-    elif rotate_objects == "VERTICAL":
+    elif rotate_objects is ObjectRotation.VERTICAL:
         if rng is None:
             rng = np.random.default_rng()
         angles = 2 * np.pi * rng.random(num_objects)
         rotations = [mn.Quaternion.rotation(mn.Rad(a), mn.Vector3(*sim.up_vector))
                      for a in angles]
-    elif rotate_objects == "3D":
+    elif rotate_objects is ObjectRotation.FREE:
         if rng is None:
             rng = np.random.default_rng()
         angles = 2 * np.pi * rng.random(num_objects)
@@ -112,7 +120,7 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
                      min_radius: float=0.5, max_radius: float=3.0,
                      num_radii: int=5, num_angles: int=12,
                      roi: Optional[Tuple[slice, slice]]=None,
-                     iou_thresh: Optional[float]=None) -> None:
+                     iou_thresh: Optional[float]=None) -> List[SpawnedObjectGoal]:
     sensor_cfg = sim.habitat_config.DEPTH_SENSOR
     if roi is None:
         h = sensor_cfg.HEIGHT
@@ -128,10 +136,21 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
 
     sensor_pos = np.array(sensor_cfg.POSITION)
     rel_sensor_positions = rel_positions + sensor_pos
+
     pan = np.arctan2(rel_sensor_positions[:, 0], rel_sensor_positions[:, 2])
+    pan_q = np.zeros((num_angles * num_radii, 4))
+    pan_q[:, 0] = np.cos(0.5 * pan)
+    pan_q[:, 2] = np.sin(0.5 * pan)
+    pan_q = quaternion.from_float_array(pan_q)
+
     hypot = np.hypot(rel_sensor_positions[:, 0], rel_sensor_positions[:, 2])
     tilt = np.arctan(-rel_sensor_positions[:, 1] / hypot)
-    sensor_rotations = quaternion.from_euler_angles(tilt, pan, np.zeros_like(pan))
+    tilt_q = np.zeros((num_angles * num_radii, 4))
+    tilt_q[:, 0] = np.cos(0.5 * tilt)
+    tilt_q[:, 1] = np.sin(0.5 * tilt)
+    tilt_q = quaternion.from_float_array(tilt_q)
+
+    sensor_rotations = pan_q * tilt_q
 
     s = sim.get_agent_state()
     max_y = sim.pathfinder.get_bounds()[1][1]
@@ -167,11 +186,11 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
     return goals
 
 
-def generate_spawned_objectgoals(sim: Simulator, template_ids: List[str],
-                                 rotate_objects: str, start_pos: np.ndarray,
+def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
+                                 template_ids: List[str], rotate_objects: ObjectRotation,
                                  rng: np.random.Generator) -> List[SpawnedObjectGoal]:
     distrib = SpawnPositionDistribution(sim)
-    positions = distrib.sample_from_connected_component(len(template_ids), rng=rng)
+    positions = distrib.sample_reachable_from_position(len(template_ids), start_pos, rng)
     goals = spawn_objects(sim, template_ids, positions, rotate_objects, rng)
     recompute_navmesh_with_static_objects(sim)
     goals = find_view_points(sim, goals, start_pos)
@@ -179,19 +198,18 @@ def generate_spawned_objectgoals(sim: Simulator, template_ids: List[str],
 
 
 def generate_spawned_objectnav_episode(sim: Simulator,
-                                       object_pool: Dict[str, Set[str]],
-                                       category_index_map: Dict[str, int],
-                                       ep_id: str, rng: np.random.Generator, max_goals: int,
-                                       rotate_objects: str) -> SpawnedObjectNavEpisode:
+                                       ep_id: str, max_goals: int,
+                                       object_pool: List[Tuple[str, int, List[str]]],
+                                       rotate_objects: ObjectRotation,
+                                       rng: np.random.Generator) -> SpawnedObjectNavEpisode:
     start_pos = sim.sample_navigable_point()
     a = 2 * np.pi * rng.random()
     start_rot = [*(np.sin(0.5 * a) * sim.up_vector), np.cos(0.5 * a)]
 
-    category, tmpl_ids = rng.choice(list(object_pool.items()), replace=False)
-    cat_index = category_index_map[category]
+    category, cat_index, tmpl_ids = rng.choice(object_pool)
     if len(tmpl_ids) > max_goals:
-        tmpl_ids = rng.choice(list(tmpl_ids), max_goals, replace=True)
-    goals = generate_spawned_objectgoals(sim, tmpl_ids, rotate_objects, start_pos, rng)
+        tmpl_ids = rng.choice(tmpl_ids, max_goals, replace=True)
+    goals = generate_spawned_objectgoals(sim, start_pos, tmpl_ids, rotate_objects, rng)
 
     return SpawnedObjectNavEpisode(episode_id=ep_id,
                                    scene_id=sim.habitat_config.SCENE,
@@ -202,28 +220,40 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                    goals=goals)
 
 
+class ExistBehavior(enum.Enum):
+    ABORT = enum.auto()
+    OVERRIDE = enum.auto()
+    APPEND = enum.auto()
+
+
 def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str],
-                                       num_episodes:int, max_goals: int, rotate_objects: str,
-                                       if_exist: str, scenes_dir: str, objects_dir: str,
-                                       seed: Optional[int]=None) -> None:
+                                       num_episodes:int, max_goals: int,
+                                       scenes_dir: str, objects_dir: str,
+                                       rotate_objects: ObjectRotation,
+                                       if_exist: ExistBehavior,
+                                       seed: Optional[int]=None) -> SpawnedObjectNavDatasetV0:
     cfg = habitat.get_config(config_path, extra_config)
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
 
     try:
         dataset = habitat.make_dataset(cfg.DATASET.TYPE, config=cfg.DATASET)
-        if if_exist == "ABORT":
+        if if_exist is ExistBehavior.ABORT:
             print("'{}' already exists, aborting".format(out_path))
             sys.exit()
-        elif if_exist == "OVERRIDE":
+        elif if_exist is ExistBehavior.OVERRIDE:
             dataset.episodes = []
+        elif if_exist is ExistBehavior.APPEND:
+            pass
     except FileNotFoundError:
         dataset = habitat.make_dataset(cfg.DATASET.TYPE)
     new_episodes = []
-    ep_id = (str(i) for i in itertools.count())
+    ep_id_gen = (f"episode_{i}" for i in itertools.count())
 
     rng = np.random.default_rng(seed)
     scene_pool = create_scene_pool(scenes_dir)
-    object_pool, cat_idx_map = create_object_pool(objects_dir)
+    rng.shuffle(scene_pool)
+    object_pool = create_object_pool(objects_dir)
+    rng.shuffle(object_pool)
 
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
     for k, scene in enumerate(scene_pool):
@@ -236,36 +266,38 @@ def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str]
             if seed is not None:
                 sim.seed(seed + k)
             for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
-                episode = generate_spawned_objectnav_episode(sim, object_pool, cat_idx_map,
-                                                             next(ep_id), rng,
-                                                             max_goals, rotate_objects)
+                episode = generate_spawned_objectnav_episode(sim, next(ep_id_gen), max_goals,
+                                                             object_pool, rotate_objects, rng)
                 new_episodes.append(episode)
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with gzip.open(out_path, 'wt') as f:
         f.write(dataset.to_json())
+    return dataset
 
 
-_DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/pointnav_gibson.yaml",
-                                 "seed": None,
-                                 "num_episodes": 4000,
-                                 "max_goals": 5,
-                                 "rotate_objects": "DISABLE",
-                                 "if_exist": "ABORT",
-                                 "scenes_dir": "data/scene_datasets/gibson",
-                                 "objects_dir": "data/object_datasets/test_objects"}
+_DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/spawned_objectnav.yaml",
+                                 "num_episodes": 25,
+                                 "max_goals": 2,
+                                 "scenes_dir": "data/scene_datasets/habitat-test-scenes",
+                                 "objects_dir": "data/object_datasets/test_objects",
+                                 "rotate_objects": ObjectRotation.FIXED,
+                                 "if_exist": ExistBehavior.ABORT,
+                                 "seed": None}
 
 
 def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-path", "-c")
-    parser.add_argument("--seed", "-s", type=int)
     parser.add_argument("--num-episodes", "-n", type=int)
     parser.add_argument("--max-goals", "-m", type=int)
-    parser.add_argument("--rotate-objects", choices=("DISABLE", "YAXIS", "3D"))
-    parser.add_argument("--if-exist", choices=("ABORT", "OVERRIDE", "APPEND"))
     parser.add_argument("--scenes-dir")
     parser.add_argument("--objects-dir")
+    parser.add_argument("--rotate-objects", type=lambda name: ObjectRotation[name],
+                        choices=[item.name for item in ObjectRotation])
+    parser.add_argument("--if-exist", type=lambda name: ExistBehavior[name],
+                        choices=[item.name for item in ExistBehavior])
+    parser.add_argument("--seed", "-s", type=int)
     parser.add_argument("extra_config", nargs=argparse.REMAINDER)
     parser.set_defaults(**_DEFAULT_ARGS)
     return parser.parse_args(argv)
