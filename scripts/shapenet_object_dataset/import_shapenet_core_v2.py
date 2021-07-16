@@ -4,6 +4,7 @@ import subprocess
 import json
 import tqdm
 import argparse
+import logging
 
 import numpy as np
 
@@ -13,7 +14,10 @@ DEFAULT_ARGS = {"input_file": "ShapeNetCore.v2.zip",
                 "filter_files": None,
                 "categories": "*",
                 "exclude_categories": "",
-                "display_cols": 5}
+                "display_cols": 5,
+                "obj_size_mean": 0.6,
+                "obj_size_std": 0.2,
+                "seed": None}
 
 
 def parse_args():
@@ -28,6 +32,9 @@ def parse_args():
     parser.add_argument("--exclude-categories", "-x",
                         help="Comma-separated list of categories to exclude")
     parser.add_argument("--display-cols", "-d", type=int)
+    parser.add_argument("--obj-size-mean", type=float)
+    parser.add_argument("--obj-size-var", type=float)
+    parser.add_argument("--seed", type=int)
     parser.set_defaults(**DEFAULT_ARGS)
     return parser.parse_args()
 
@@ -35,8 +42,6 @@ def parse_args():
 ROOT = "ShapeNetCore.v2"
 DEFAULT_EXCLUDED = ["*/screenshots/*", "*.binvox"]
 OBJ_CFG_EXT = ".object_config.json"
-SIZE_REMAP = np.array([(0, 0), (1, 1), (4, 2), (12, 0.5), (60, 1)])
-SIZE_VAR = 0.2
 
 
 def parse_taxonomy(in_file, toplevel=True, children_to_toplevel=False):
@@ -147,37 +152,54 @@ def extract_files(categories, counts, to_extract, input_file):
     return to_extract
 
 
-def make_object_config(model_entry, synset_id):
-    json_path = os.path.join(model_entry.path, "models", "model_normalized.json")
-    ox, oy, oz = 0.0, 0.0, 0.0
-    scale = 1.0
+def compute_scales(model_entry, obj_size_mean, obj_size_std, rng):
+    obj_path = os.path.join(model_entry.path, "models", "model_normalized.obj")
     try:
-        with open(json_path) as f:
-            obj_data = json.load(f)
-        os.remove(json_path)
-        ox = 0.5 * (obj_data["min"][0] + obj_data["max"][0])
-        oy = obj_data["min"][1]
-        oz = 0.5 * (obj_data["min"][2] + obj_data["max"][2])
-        size = max(up - low for up, low in zip(obj_data["max"], obj_data["min"]))
-        scale = np.interp(size, SIZE_REMAP[:, 0], SIZE_REMAP[:, 1]) / size
-        scale *= np.random.normal(1, SIZE_VAR)
-    except FileNotFoundError as e:
-        print("Warning! Model '{}' is not normalized as expected".format(model_entry.name))
+        with open(obj_path) as objf:
+            vertices = [[float(val) for val in l.strip().split()[1:]]
+                        for l in f if l.startswith("v ")]
+    except FileNotFoundError:
+        logging.warning(f"Model '{model_entry.name}' does not have a normalized .obj file.")
+        return 1.0, 1.0
 
+    json_path = os.path.join(model_entry.path, "models", "model_normalized.json")
+    try:
+        with open(json_path) as jsonf:
+            data = json.load(jsonf)
+        os.remove(json_path)
+    except FileNotFoundError:
+        logging.warning(f"Model '{model_entry.name}' does not have a normalized .json file.")
+        return 1.0, 1.0
+
+    vertices = np.array(vertices)
+    mesh_size = vertices.max(axis=0) - vertices.min(axis=0)
+    real_size = np.array(data['max']) - np.array(data['min'])
+    if obj_size_std is None:
+        desired_size = obj_size_mean
+    else:
+        desired_size = rng.normal(obj_size_mean, obj_size_std)
+
+    units_to_meters = (real_size / mesh_size).min()
+    scale = desired_size / real_size.mean()
+    return units_to_meters, scale
+
+
+def make_object_config(model_entry, units_to_meters, scale, synset_id):
     rel_obj_path = os.path.join(model_entry.name, "models", "model_normalized.obj")
     with open(model_entry.path + OBJ_CFG_EXT, 'wt') as f:
         json.dump({"render_asset": rel_obj_path,
+                   "requires_lighting": True,
                    "up": [0.0, 1.0, 0.0],
                    "front": [0.0, 0.0, -1.0],
-                   "COM": [ox, oy, oz],
+                   "units_to_meters": units_to_meters,
                    "scale": [scale, scale, scale],
                    "is_collidable": True,
                    "use_bounding_box_for_collision": True,
-                   "requires_lighting": True,
+                   "join_collision_meshes": True,
                    "semantic_id": int(synset_id)}, f, indent=2)
 
 
-def move_files(categories, extracted, output_dir):
+def move_files(categories, extracted, output_dir, obj_size_mean, obj_size_rng, rng):
     total = len(extracted)
     w_cat = max(len(cat) for cat in extracted)
     w_i = len(str(total))
@@ -197,7 +219,8 @@ def move_files(categories, extracted, output_dir):
         with os.scandir(out_base) as dir_iter:
             models = [entry for entry in dir_iter if entry.is_dir()]
         for entry in tqdm.tqdm(models, desc=f"Moving {cat: >{w_cat}} ({i: {w_i}d}/{total})"):
-            make_object_config(entry, synset_id)
+            units_to_meters, scale = compute_scales(entry, obj_size_mean, obj_size_std, rng)
+            make_object_config(entry, units_to_meters, scale, synset_id)
 
 
 def cleanup():
@@ -215,7 +238,9 @@ def main(args):
     desired_cat = apply_filters(desired_cat, exclude_cat, args.filter_files)
     to_extract = check_existing_dirs(desired_cat, args.output_dir)
     extracted = extract_files(categories, counts, to_extract, args.input_file)
-    move_files(categories, extracted, args.output_dir)
+    rng = np.random.default_rng(args.seed)
+    move_files(categories, extracted, args.output_dir,
+               args.obj_size_mean, args.obj_size_std, rng)
     cleanup()
 
 
