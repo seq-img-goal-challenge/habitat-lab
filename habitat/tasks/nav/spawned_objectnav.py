@@ -178,7 +178,7 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
         s.sensor_states[self._sensor_uuid].position = position
         s.sensor_states[self._sensor_uuid].rotation = rotation
         self._sim.get_agent(agent_id).set_state(s, False, False)
-        return self._sim.get_sensor_observations()[self._sensor_uuid]
+        return self._sim.get_sensor_observations()[self._sensor_uuid][:, :, :3]
 
     def _generate_views_around_goal(self, goal: SpawnedObjectGoal, num_views: int) -> None:
         if self.config.OUT_OF_CONTEXT:
@@ -198,11 +198,21 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
                 sensor = self._sim.sensor_suite.sensors[self._sensor_uuid]
                 rel_pos += np.array(sensor.config.POSITION)
 
-            pan = np.arctan2(rel_pos[:, 0], rel_pos[:, 2])
-            tilt = np.arctan(-rel_pos[:, 1] / np.hypot(rel_pos[:, 0], rel_pos[:, 2]))
+            pan = np.arctan2(rel_sensor_positions[:, 0], rel_sensor_positions[:, 2])
+            pan_q = np.zeros((num_angles * num_radii, 4))
+            pan_q[:, 0] = np.cos(0.5 * pan)
+            pan_q[:, 2] = np.sin(0.5 * pan)
+            pan_q = quaternion.from_float_array(pan_q)
+
+            hypot = np.hypot(rel_sensor_positions[:, 0], rel_sensor_positions[:, 2])
+            tilt = np.arctan(-rel_sensor_positions[:, 1] / hypot)
+            tilt_q = np.zeros((num_angles * num_radii, 4))
+            tilt_q[:, 0] = np.cos(0.5 * tilt)
+            tilt_q[:, 1] = np.sin(0.5 * tilt)
+            tilt_q = quaternion.from_float_array(tilt_q)
 
             positions = np.array(self.config.OUT_OF_CONTEXT_POS) + rel_pos
-            rotations = quaternion.from_euler_angles(tilt, pan, np.zeros_like(pan))
+            rotations = pan_q * tilt_q
             goal._appearance_cache = [self._render_view(pos, rot)
                                       for pos, rot in zip(positions, rotations)]
 
@@ -225,4 +235,5 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
             # should we enforce balance of num_views between goals or not?
         views = np.array(list(chain.from_iterable(goal._appearance_cache
                                                   for goal in episode.goals)))
+        # TODO (gbono): cache the concatenated array, not just the goal views...)
         return views

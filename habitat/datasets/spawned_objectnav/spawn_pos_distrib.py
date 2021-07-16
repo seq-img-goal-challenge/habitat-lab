@@ -200,3 +200,19 @@ class SpawnPositionDistribution:
         u = cumul[-1] * rng.random(num_samples)
         flat_i = np.digitize(u, cumul)
         return self.map_to_world(i[flat_i], j[flat_i])
+
+    def sample_reachable_from_position(self, num_samples: int=1,
+                                             position: Optional[np.ndarray]=None,
+                                             rng: Optional[np.random.Generator]=None) \
+                                      -> np.ndarray:
+        if rng is None:
+            if self._rng is None:
+                self.seed()
+            rng = self._rng
+        if position is None:
+            position = self._sim.get_agent_state().position
+        if self._conn_comp_masks is None:
+            self._update_conn_comp()
+        i, j = self.world_to_map(position)
+        conn_comp_index = np.argmax(self._conn_comp_masks[i, j])
+        return self.sample_from_connected_component(num_samples, conn_comp_index, rng)
