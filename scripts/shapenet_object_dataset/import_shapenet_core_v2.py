@@ -11,12 +11,12 @@ import numpy as np
 
 DEFAULT_ARGS = {"input_file": "ShapeNetCore.v2.zip",
                 "output_dir": "data/object_datasets/shapenet_core_v2",
-                "filter_files": None,
+                "filter_files": "",
                 "categories": "*",
                 "exclude_categories": "",
                 "display_cols": 5,
                 "obj_size_mean": 0.6,
-                "obj_size_std": 0.2,
+                "obj_size_std": 0.15,
                 "seed": None}
 
 
@@ -42,6 +42,7 @@ def parse_args():
 ROOT = "ShapeNetCore.v2"
 DEFAULT_EXCLUDED = ["*/screenshots/*", "*.binvox"]
 OBJ_CFG_EXT = ".object_config.json"
+MIN_SIZE_CLAMP = 0.1
 
 
 def parse_taxonomy(in_file, toplevel=True, children_to_toplevel=False):
@@ -78,29 +79,33 @@ def parse_taxonomy(in_file, toplevel=True, children_to_toplevel=False):
 def read_filter_file(filter_file):
     included = set()
     excluded = set()
-    with open(filter_file) as f:
-        for l in f:
-            try:
-                op, cat = l.strip().split(" ", 1)
-                if op == "+":
-                    included.add(cat)
-                    excluded.discard(cat)
-                elif op == "-":
-                    excluded.add(cat)
-                    included.discard(cat)
-                else:
+    try:
+        with open(filter_file) as f:
+            for l in f:
+                try:
+                    op, cat = l.strip().split(" ", 1)
+                    if op == "+":
+                        included.add(cat)
+                        excluded.discard(cat)
+                    elif op == "-":
+                        excluded.add(cat)
+                        included.discard(cat)
+                    else:
+                        continue
+                except ValueError:
                     continue
-            except ValueError:
-                continue
+    except FileNotFoundError:
+        logging.warning("Cannot find filter file '{}' ".format(filter_file))
     return included, excluded
 
 
 def apply_filters(desired_categories, exclude_categories, filter_files):
     desired_categories -= exclude_categories
-    for path in filter_files.split(','):
-        included, excluded = read_filter_file(path)
-        desired_categories |= included
-        desired_categories -= excluded
+    if filter_files:
+        for path in filter_files.split(','):
+            included, excluded = read_filter_file(path)
+            desired_categories |= included
+            desired_categories -= excluded
     return desired_categories
 
 
@@ -152,46 +157,34 @@ def extract_files(categories, counts, to_extract, input_file):
     return to_extract
 
 
-def compute_scales(model_entry, obj_size_mean, obj_size_std, rng):
+def compute_scale(model_entry, obj_size_mean, obj_size_std, rng):
     obj_path = os.path.join(model_entry.path, "models", "model_normalized.obj")
     try:
         with open(obj_path) as objf:
             vertices = [[float(val) for val in l.strip().split()[1:]]
-                        for l in f if l.startswith("v ")]
+                        for l in objf if l.startswith("v ")]
     except FileNotFoundError:
         logging.warning(f"Model '{model_entry.name}' does not have a normalized .obj file.")
-        return 1.0, 1.0
-
-    json_path = os.path.join(model_entry.path, "models", "model_normalized.json")
-    try:
-        with open(json_path) as jsonf:
-            data = json.load(jsonf)
-        os.remove(json_path)
-    except FileNotFoundError:
-        logging.warning(f"Model '{model_entry.name}' does not have a normalized .json file.")
-        return 1.0, 1.0
+        return 1.0
 
     vertices = np.array(vertices)
     mesh_size = vertices.max(axis=0) - vertices.min(axis=0)
-    real_size = np.array(data['max']) - np.array(data['min'])
     if obj_size_std is None:
         desired_size = obj_size_mean
     else:
-        desired_size = rng.normal(obj_size_mean, obj_size_std)
+        desired_size = max(rng.normal(obj_size_mean, obj_size_std), MIN_SIZE_CLAMP)
 
-    units_to_meters = (real_size / mesh_size).min()
-    scale = desired_size / real_size.mean()
-    return units_to_meters, scale
+    scale = desired_size / mesh_size.max()
+    return scale
 
 
-def make_object_config(model_entry, units_to_meters, scale, synset_id):
+def make_object_config(model_entry, scale, synset_id):
     rel_obj_path = os.path.join(model_entry.name, "models", "model_normalized.obj")
     with open(model_entry.path + OBJ_CFG_EXT, 'wt') as f:
         json.dump({"render_asset": rel_obj_path,
                    "requires_lighting": True,
                    "up": [0.0, 1.0, 0.0],
                    "front": [0.0, 0.0, -1.0],
-                   "units_to_meters": units_to_meters,
                    "scale": [scale, scale, scale],
                    "is_collidable": True,
                    "use_bounding_box_for_collision": True,
@@ -199,7 +192,7 @@ def make_object_config(model_entry, units_to_meters, scale, synset_id):
                    "semantic_id": int(synset_id)}, f, indent=2)
 
 
-def move_files(categories, extracted, output_dir, obj_size_mean, obj_size_rng, rng):
+def move_files(categories, extracted, output_dir, obj_size_mean, obj_size_std, rng):
     total = len(extracted)
     w_cat = max(len(cat) for cat in extracted)
     w_i = len(str(total))
@@ -212,15 +205,15 @@ def move_files(categories, extracted, output_dir, obj_size_mean, obj_size_rng, r
             except FileNotFoundError:
                 pass
         else:
-            print("Warning! Cannot find extracted files for category '{}' ".format(cat) \
-                  + "(synset IDs: {}), skipping...".format(categories[cat]))
+            logging.warning("Cannot find extracted files for category '{}' ".format(cat) \
+                            + "(synset IDs: {}), skipping...".format(categories[cat]))
             continue
 
         with os.scandir(out_base) as dir_iter:
             models = [entry for entry in dir_iter if entry.is_dir()]
         for entry in tqdm.tqdm(models, desc=f"Moving {cat: >{w_cat}} ({i: {w_i}d}/{total})"):
-            units_to_meters, scale = compute_scales(entry, obj_size_mean, obj_size_std, rng)
-            make_object_config(entry, units_to_meters, scale, synset_id)
+            scale = compute_scale(entry, obj_size_mean, obj_size_std, rng)
+            make_object_config(entry, scale, synset_id)
 
 
 def cleanup():
