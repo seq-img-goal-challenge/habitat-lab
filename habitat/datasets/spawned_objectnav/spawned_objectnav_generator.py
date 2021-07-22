@@ -294,9 +294,9 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
     parser.add_argument("--scenes-dir")
     parser.add_argument("--objects-dir")
     parser.add_argument("--rotate-objects", type=lambda name: ObjectRotation[name],
-                        choices=[item.name for item in ObjectRotation])
+                        choices=list(ObjectRotation))
     parser.add_argument("--if-exist", type=lambda name: ExistBehavior[name],
-                        choices=[item.name for item in ExistBehavior])
+                        choices=list(ExistBehavior))
     parser.add_argument("--seed", "-s", type=int)
     parser.add_argument("extra_config", nargs=argparse.REMAINDER)
     parser.set_defaults(**_DEFAULT_ARGS)
