@@ -45,6 +45,18 @@ class ObjectPoolCategory:
         yield self.templates
 
 
+class ObjectRotation(enum.Enum):
+    FIXED = enum.auto()
+    VERTICAL = enum.auto()
+    FREE = enum.auto()
+
+
+class ExistBehavior(enum.Enum):
+    ABORT = enum.auto()
+    OVERRIDE = enum.auto()
+    APPEND = enum.auto()
+
+
 def create_object_pool(objects_dir: str) -> List[ObjectPoolCategory]:
     return sorted(ObjectPoolCategory(
         dir_entry.name, i,
@@ -56,12 +68,6 @@ def create_object_pool(objects_dir: str) -> List[ObjectPoolCategory]:
 def create_scene_pool(scenes_dir: str) -> List[str]:
     return sorted(entry.path for entry in os.scandir(scenes_dir)
                   if entry.is_file() and entry.name.endswith(DEFAULT_SCENE_PATH_EXT))
-
-
-class ObjectRotation(enum.Enum):
-    FIXED = enum.auto()
-    VERTICAL = enum.auto()
-    FREE = enum.auto()
 
 
 def spawn_objects(sim: Simulator,
@@ -198,8 +204,9 @@ def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
 
 
 def generate_spawned_objectnav_episode(sim: Simulator,
-                                       ep_id: str, max_goals: int,
-                                       object_pool: List[Tuple[str, int, List[str]]],
+                                       ep_id: str,
+                                       max_goals: int,
+                                       object_pool: List[ObjectPoolCategory],
                                        rotate_objects: ObjectRotation,
                                        rng: np.random.Generator) -> SpawnedObjectNavEpisode:
     start_pos = sim.sample_navigable_point()
@@ -220,15 +227,9 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                    goals=goals)
 
 
-class ExistBehavior(enum.Enum):
-    ABORT = enum.auto()
-    OVERRIDE = enum.auto()
-    APPEND = enum.auto()
-
-
 def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str],
-                                       num_episodes:int, max_goals: int,
                                        scenes_dir: str, objects_dir: str,
+                                       num_episodes:int, max_goals: int,
                                        rotate_objects: ObjectRotation,
                                        if_exist: ExistBehavior,
                                        seed: Optional[int]=None) -> SpawnedObjectNavDatasetV0:
@@ -277,10 +278,10 @@ def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str]
 
 
 _DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/spawned_objectnav.yaml",
-                                 "num_episodes": 25,
-                                 "max_goals": 2,
                                  "scenes_dir": "data/scene_datasets/habitat-test-scenes",
                                  "objects_dir": "data/object_datasets/test_objects",
+                                 "num_episodes": 25,
+                                 "max_goals": 2,
                                  "rotate_objects": ObjectRotation.FIXED,
                                  "if_exist": ExistBehavior.ABORT,
                                  "seed": None}
@@ -289,10 +290,10 @@ _DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/spawned_objectnav
 def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-path", "-c")
-    parser.add_argument("--num-episodes", "-n", type=int)
-    parser.add_argument("--max-goals", "-m", type=int)
     parser.add_argument("--scenes-dir")
     parser.add_argument("--objects-dir")
+    parser.add_argument("--num-episodes", "-n", type=int)
+    parser.add_argument("--max-goals", "-m", type=int)
     parser.add_argument("--rotate-objects", type=lambda name: ObjectRotation[name],
                         choices=list(ObjectRotation))
     parser.add_argument("--if-exist", type=lambda name: ExistBehavior[name],
