@@ -168,8 +168,18 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
         self._sim.set_object_motion_type(MotionType.KINEMATIC, goal._spawned_object_id)
         self._sim.set_translation(self.config.OUT_OF_CONTEXT_POS, goal._spawned_object_id)
 
+        if self.config.RANDOM_OBJECT_ROTATION == "3D":
+            ax = np.random.randn(3)
+            ax /= np.linalg.norm(ax)
+            a = 2 * np.pi * np.random.random()
+            rot = mn.Quaternion.rotation(mn.Rad(a), mn.Vector3(*ax))
+            self._sim.set_rotation(rot, goal._spawned_object_id)
+
     def _restore_object_in_context(self, goal: SpawnedObjectGoal):
         self._sim.set_translation(goal.position, goal._spawned_object_id)
+        if self.config.RANDOM_OBJECT_ROTATION == "3D":
+            self._sim.set_rotation(mn.Quaternion(goal.rotation[:3], goal.rotation[3]),
+                                   goal._spawned_object_id)
         self._sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
 
     def _render_view(self, position: np.ndarray, rotation: np.quaternion) -> VisualObservation:
@@ -186,27 +196,23 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
 
             r = (self.config.MAX_VIEW_DISTANCE - self.config.MIN_VIEW_DISTANCE) \
                     * np.random.random(num_views) + self.config.MIN_VIEW_DISTANCE
-            if self.config.RANDOM_OBJECT_ROTATION == "3D":
-                rel_pos = np.random.randn(num_views, 3)
-                rel_pos /= np.linalg.norm(headings, axis=-1, keepdims=True)
-                rel_pos *= r[:, None]
-            else:
-                a = 2 * np.pi * np.random.random(num_views)
-                rel_pos = np.zeros((num_views, 3))
-                rel_pos[:, 0] = r * np.cos(a)
-                rel_pos[:, 2] = r * np.sin(a)
-                sensor = self._sim.sensor_suite.sensors[self._sensor_uuid]
-                rel_pos += np.array(sensor.config.POSITION)
+            a = 2 * np.pi * np.random.random(num_views)
 
-            pan = np.arctan2(rel_sensor_positions[:, 0], rel_sensor_positions[:, 2])
-            pan_q = np.zeros((num_angles * num_radii, 4))
+            rel_pos = np.zeros((num_views, 3))
+            rel_pos[:, 0] = r * np.cos(a)
+            rel_pos[:, 2] = r * np.sin(a)
+            sensor = self._sim.sensor_suite.sensors[self._sensor_uuid]
+            rel_pos += np.array(sensor.config.POSITION)
+
+            pan = np.arctan2(rel_pos[:, 0], rel_pos[:, 2])
+            pan_q = np.zeros((num_views, 4))
             pan_q[:, 0] = np.cos(0.5 * pan)
             pan_q[:, 2] = np.sin(0.5 * pan)
             pan_q = quaternion.from_float_array(pan_q)
 
-            hypot = np.hypot(rel_sensor_positions[:, 0], rel_sensor_positions[:, 2])
-            tilt = np.arctan(-rel_sensor_positions[:, 1] / hypot)
-            tilt_q = np.zeros((num_angles * num_radii, 4))
+            hypot = np.hypot(rel_pos[:, 0], rel_pos[:, 2])
+            tilt = np.arctan(-rel_pos[:, 1] / hypot)
+            tilt_q = np.zeros((num_views, 4))
             tilt_q[:, 0] = np.cos(0.5 * tilt)
             tilt_q[:, 1] = np.sin(0.5 * tilt)
             tilt_q = quaternion.from_float_array(tilt_q)

@@ -529,6 +529,7 @@ def test_generate_episode():
 
     OBJECTS_DIR = "data/object_datasets/test_objects"
     MAX_GOALS = 2
+    NUM_RETRIES = 2
 
     sim_cfg = habitat.get_config().SIMULATOR
     sim_cfg.defrost()
@@ -545,7 +546,7 @@ def test_generate_episode():
         obj_pool = create_object_pool(OBJECTS_DIR)
         rng = np.random.default_rng(123456)
         episode = generate_spawned_objectnav_episode(sim, "ep0", MAX_GOALS, obj_pool,
-                                                     ObjectRotation.FIXED, rng)
+                                                     ObjectRotation.FIXED, NUM_RETRIES, rng)
         lower, upper = sim.pathfinder.get_bounds()
         assert isinstance(episode, SpawnedObjectNavEpisode)
         assert episode.episode_id == "ep0"
@@ -572,6 +573,8 @@ def test_generate_dataset():
     CFG_PATH = "configs/tasks/spawned_objectnav.yaml"
     NUM_EPISODES = 3
     MAX_GOALS = 2
+    NUM_RETRIES = 2
+    SEED = 123789
     SCENES_DIR = "data/scene_datasets/habitat-test-scenes"
     SCENE_EXT = ".glb"
     if not os.path.isdir(SCENES_DIR):
@@ -583,7 +586,7 @@ def test_generate_dataset():
 
     generate_spawned_objectnav_dataset(CFG_PATH, [], SCENES_DIR, OBJECTS_DIR, 
                                        NUM_EPISODES, MAX_GOALS, ObjectRotation.FIXED,
-                                       ExistBehavior.OVERRIDE, 123456)
+                                       ExistBehavior.OVERRIDE, NUM_RETRIES, SEED)
     data_cfg = habitat.get_config(CFG_PATH).DATASET
     data_path = data_cfg.DATA_PATH.format(split=data_cfg.SPLIT)
     assert os.path.isfile(data_path)
@@ -683,6 +686,27 @@ def test_objectgoal_appearance_sensor():
     num_views = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.NUM_VIEWS
     width = cfg.SIMULATOR.RGB_SENSOR.WIDTH
     height = cfg.SIMULATOR.RGB_SENSOR.HEIGHT
+    with habitat.Env(cfg) as env:
+        for _ in env.episodes:
+            obs = env.reset()
+            ep = env.current_episode
+            prv_views = None
+
+            assert 'objectgoal_appearance' in obs
+            for a in ACTIONS:
+                views = obs['objectgoal_appearance']
+                assert isinstance(views, np.ndarray)
+                assert views.shape == (num_views, height, width, 3)
+                assert views.dtype == np.uint8
+                if prv_views is not None:
+                    assert np.allclose(prv_views, views)
+                prv_views = views.copy()
+                obs = env.step(a)
+
+
+    cfg.defrost()
+    cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.OUT_OF_CONTEXT = True
+    cfg.freeze()
     with habitat.Env(cfg) as env:
         for _ in env.episodes:
             obs = env.reset()

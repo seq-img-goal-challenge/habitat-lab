@@ -40,6 +40,7 @@ def test_generate_dataset():
     MIN_SEQ_LEN = 1
     MAX_SEQ_LEN = 3
     MAX_GOALS = 2
+    NUM_RETRIES = 5
     SCENES_DIR = "data/scene_datasets/habitat-test-scenes"
     SCENE_EXT = ".glb"
     if not os.path.isdir(SCENES_DIR):
@@ -52,7 +53,7 @@ def test_generate_dataset():
     generate_sequential_objectnav_dataset(CFG_PATH, [], SCENES_DIR, OBJECTS_DIR, 
                                           NUM_EPISODES, MIN_SEQ_LEN, MAX_SEQ_LEN,
                                           MAX_GOALS, ObjectRotation.FIXED,
-                                          ExistBehavior.OVERRIDE, 123456)
+                                          ExistBehavior.OVERRIDE, NUM_RETRIES, 123456)
     data_cfg = habitat.get_config(CFG_PATH).DATASET
     data_path = data_cfg.DATA_PATH.format(split=data_cfg.SPLIT)
     assert os.path.isfile(data_path)

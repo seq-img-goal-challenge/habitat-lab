@@ -1,4 +1,4 @@
-from typing import Any, Optional, Tuple, List, Dict
+from typing import Any, Optional, Tuple, List, Dict, Iterator
 import argparse
 import enum
 import sys
@@ -31,15 +31,15 @@ class ObjectPoolCategory:
     index: int
     templates: List[str]
 
-    def __init__(self, name, index, templates):
+    def __init__(self, name, index, templates) -> None:
         self.name = name
         self.index = index
         self.templates = sorted(templates)
 
-    def __lt__(self, other):
+    def __lt__(self, other) -> bool:
         return self.name < other.name
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[Any]:
         yield self.name
         yield self.index
         yield self.templates
@@ -55,6 +55,37 @@ class ExistBehavior(enum.Enum):
     ABORT = enum.auto()
     OVERRIDE = enum.auto()
     APPEND = enum.auto()
+
+
+class UnreachableGoalError(Exception):
+    goal: SpawnedObjectGoal
+    start_pos: List[float]
+
+    def __init__(self, goal: SpawnedObjectGoal, start_pos: List[float]) -> None:
+        super().__init__(goal, start_pos)
+        self.goal = goal
+        self.start_pos = start_pos
+
+    def __str__(self) -> str:
+        cat = self.goal.object_template_id.split('/')[-2]
+        return f"Could not find view points reachable from {self.start_pos} " \
+                + f"for goal '{cat}' at position {self.goal.position}."
+
+
+class MaxRetriesError(Exception):
+    task_desc: str
+    num_retries: int
+    errors: List[Exception]
+
+    def __init__(self, task_desc: str, num_retries: int, errors: List[Exception]) -> None:
+        super().__init__(task_desc, num_retries, errors)
+        self.task_desc = task_desc
+        self.num_retries = num_retries
+        self.errors = errors
+
+    def __str__(self) -> str:
+        return f"Could not {self.task_desc} after {self.num_retries} retries:\n" \
+                + "\n".join(f"  {i}. {e!s}" for i, e in enumerate(self.errors, start=1))
 
 
 def create_object_pool(objects_dir: str) -> List[ObjectPoolCategory]:
@@ -189,13 +220,15 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
             goal.view_points.append(ViewPoint(position=(pos + sensor_pos).tolist(),
                                               rotation=[rot.x, rot.y, rot.z, rot.w],
                                               iou=iou))
+        if not goal.view_points:
+            raise UnreachableGoalError(goal, start_pos)
     return goals
 
 
 def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
                                  template_ids: List[str], rotate_objects: ObjectRotation,
                                  rng: np.random.Generator) -> List[SpawnedObjectGoal]:
-    distrib = SpawnPositionDistribution(sim)
+    distrib = SpawnPositionDistribution(sim, height=start_pos[1])
     positions = distrib.sample_reachable_from_position(len(template_ids), start_pos, rng)
     goals = spawn_objects(sim, template_ids, positions, rotate_objects, rng)
     recompute_navmesh_with_static_objects(sim)
@@ -208,6 +241,7 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                        max_goals: int,
                                        object_pool: List[ObjectPoolCategory],
                                        rotate_objects: ObjectRotation,
+                                       num_retries: int,
                                        rng: np.random.Generator) -> SpawnedObjectNavEpisode:
     start_pos = sim.sample_navigable_point()
     a = 2 * np.pi * rng.random()
@@ -216,7 +250,15 @@ def generate_spawned_objectnav_episode(sim: Simulator,
     category, cat_index, tmpl_ids = rng.choice(object_pool)
     if len(tmpl_ids) > max_goals:
         tmpl_ids = rng.choice(tmpl_ids, max_goals, replace=True)
-    goals = generate_spawned_objectgoals(sim, start_pos, tmpl_ids, rotate_objects, rng)
+    errors = []
+    for _ in range(num_retries):
+        try:
+            goals = generate_spawned_objectgoals(sim, start_pos, tmpl_ids, rotate_objects, rng)
+            break
+        except UnreachableGoalError as e:
+            errors.append(e)
+    else:
+        raise MaxRetriesError("generate reachable goals", num_retries, errors)
 
     return SpawnedObjectNavEpisode(episode_id=ep_id,
                                    scene_id=sim.habitat_config.SCENE,
@@ -232,6 +274,7 @@ def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str]
                                        num_episodes:int, max_goals: int,
                                        rotate_objects: ObjectRotation,
                                        if_exist: ExistBehavior,
+                                       num_retries: int,
                                        seed: Optional[int]=None) -> SpawnedObjectNavDatasetV0:
     cfg = habitat.get_config(config_path, extra_config)
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
@@ -268,7 +311,8 @@ def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str]
                 sim.seed(seed + k)
             for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                 episode = generate_spawned_objectnav_episode(sim, next(ep_id_gen), max_goals,
-                                                             object_pool, rotate_objects, rng)
+                                                             object_pool, rotate_objects,
+                                                             num_retries, rng)
                 new_episodes.append(episode)
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -284,6 +328,7 @@ _DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/spawned_objectnav
                                  "max_goals": 2,
                                  "rotate_objects": ObjectRotation.FIXED,
                                  "if_exist": ExistBehavior.ABORT,
+                                 "num_retries": 4,
                                  "seed": None}
 
 
@@ -298,6 +343,7 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
                         choices=list(ObjectRotation))
     parser.add_argument("--if-exist", type=lambda name: ExistBehavior[name],
                         choices=list(ExistBehavior))
+    parser.add_argument("--num-retries", "-r", type=int)
     parser.add_argument("--seed", "-s", type=int)
     parser.add_argument("extra_config", nargs=argparse.REMAINDER)
     parser.set_defaults(**_DEFAULT_ARGS)
