@@ -10,6 +10,7 @@ import habitat
 from habitat.core.simulator import Simulator
 from habitat.datasets.spawned_objectnav.spawned_objectnav_generator \
         import ObjectPoolCategory, ObjectRotation, ExistBehavior, \
+               UnreachableGoalError, MaxRetriesError, \
                create_object_pool, create_scene_pool, generate_spawned_objectgoals
 from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNavStep, \
                                                               SequentialObjectNavEpisode
@@ -22,6 +23,7 @@ def generate_sequential_objectnav_episode(sim: Simulator,
                                           max_goals: int,
                                           object_pool: List[ObjectPoolCategory],
                                           rotate_objects: ObjectRotation,
+                                          num_retries: int,
                                           rng: np.random.Generator) \
                                          -> SequentialObjectNavEpisode:
     start_pos = sim.sample_navigable_point()
@@ -43,7 +45,16 @@ def generate_sequential_objectnav_episode(sim: Simulator,
         step_splits.append((category, cat_index, prv_len, nxt_len))
         prv_len = nxt_len
 
-    goals = generate_spawned_objectgoals(sim, start_pos, all_tmpl_ids, rotate_objects, rng)
+    errors = []
+    for _ in range(num_retries):
+        try:
+            goals = generate_spawned_objectgoals(sim, start_pos, all_tmpl_ids,
+                                                 rotate_objects, rng)
+            break
+        except UnreachableGoalError as e:
+            errors.append(e)
+    else:
+        raise MaxRetriesError("generate reachable goals", num_retries, errors)
     steps = [SequentialObjectNavStep(object_category=category,
                                      object_category_index=cat_index,
                                      goals=goals[first:last])
@@ -61,6 +72,7 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
                                           min_seq_len: int, max_seq_len: int, max_goals: int,
                                           rotate_objects: ObjectRotation,
                                           if_exist: ExistBehavior,
+                                          num_retries: int,
                                           seed: Optional[int]=None) -> None:
     cfg = habitat.get_config(config_path, extra_config)
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
@@ -99,6 +111,7 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
                                                                 max_goals,
                                                                 object_pool,
                                                                 rotate_objects,
+                                                                num_retries,
                                                                 rng)
                 new_episodes.append(episode)
     dataset.episodes.extend(new_episodes)
@@ -116,6 +129,7 @@ _DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/pointnav_gibson.y
                                  "max_goals": 1,
                                  "rotate_objects": ObjectRotation.FIXED,
                                  "if_exist": ExistBehavior.ABORT,
+                                 "num_retries": 4,
                                  "seed": None}
 
 
@@ -128,8 +142,11 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
     parser.add_argument("--min-seq-len", "-k", type=int)
     parser.add_argument("--max-seq-len", "-l", type=int)
     parser.add_argument("--max-goals", "-m", type=int)
-    parser.add_argument("--rotate-objects", choices=("DISABLE", "YAXIS", "3D"))
-    parser.add_argument("--if-exist", choices=("ABORT", "OVERRIDE", "APPEND"))
+    parser.add_argument("--rotate-objects", type=lambda name: ObjectRotation[name],
+                        choices=list(ObjectRotation))
+    parser.add_argument("--if-exist", type=lambda name: ExistBehavior[name],
+                        choices=list(ExistBehavior))
+    parser.add_argument("--num-retries", "-r", type=int)
     parser.add_argument("--seed", "-s", type=int)
     parser.add_argument("extra_config", nargs=argparse.REMAINDER)
     parser.set_defaults(**_DEFAULT_ARGS)
