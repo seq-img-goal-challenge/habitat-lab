@@ -331,7 +331,6 @@ def test_spawn_objects_fixed_rot():
             assert goal.view_points == []
             assert goal.radius is None
             assert goal._spawned_object_id is not None
-            assert goal._appearance_cache is None
 
             assert sim.get_object_motion_type(goal._spawned_object_id) == MotionType.STATIC
 
@@ -434,8 +433,8 @@ def test_find_view_points():
 
     OBJECTS_DIR = "data/object_datasets/test_objects"
     OBJECT_EXT = ".object_config.json"
-    NUM_RADII = 5
-    NUM_ANGLES = 12
+    NUM_ANGLES = 20
+    NUM_RADII = 10
 
     sim_cfg = habitat.get_config().SIMULATOR
     sim_cfg.defrost()
@@ -459,7 +458,7 @@ def test_find_view_points():
         start_pos = sim.get_agent_state().position
 
         goals = find_view_points(sim, src_goals, start_pos,
-                                 num_radii=NUM_RADII, num_angles=NUM_ANGLES)
+                                 num_angles=NUM_ANGLES, num_radii=NUM_RADII)
         sensor_pos = np.array(sim.habitat_config.DEPTH_SENSOR.POSITION)
         assert isinstance(goals, list)
         for goal, src_goal, cp_goal in zip(goals, src_goals, cp_goals):
@@ -469,7 +468,6 @@ def test_find_view_points():
             assert np.allclose(goal.rotation, cp_goal.rotation)
             assert goal.object_template_id == cp_goal.object_template_id
             assert goal.radius is None
-            assert goal._appearance_cache is None
             assert 0 < len(goal.view_points) <= NUM_RADII * NUM_ANGLES
             for view_pt in goal.view_points:
                 ag_pos = view_pt.position - sensor_pos
@@ -512,8 +510,7 @@ def test_generate_spawned_objectgoals():
             assert goal.object_template_id == tmpl_id
             assert goal.radius is None
             assert goal._spawned_object_id is not None
-            assert goal._appearance_cache is None
-            assert 0 < len(goal.view_points) <= 60
+            assert 0 < len(goal.view_points) <= 200
             for view_pt in goal.view_points:
                 ag_pos = view_pt.position - sensor_pos
                 assert sim.pathfinder.is_navigable(ag_pos)
@@ -607,8 +604,7 @@ def test_generate_dataset():
             assert goal.object_template_id.endswith(OBJECT_EXT)
             assert os.path.isfile(goal.object_template_id)
             assert goal._spawned_object_id is None
-            assert goal._appearance_cache is None
-            assert 0 < len(goal.view_points) <= 60
+            assert 0 < len(goal.view_points) <= 200
 
 
 def test_task():
