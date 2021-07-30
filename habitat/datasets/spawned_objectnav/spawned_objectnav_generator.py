@@ -18,10 +18,11 @@ from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, ViewPoint, \
 from habitat.datasets.spawned_objectnav.spawned_objectnav_dataset \
         import SpawnedObjectNavDatasetV0
 from habitat.datasets.spawned_objectnav.spawn_pos_distrib import SpawnPositionDistribution
-from habitat.datasets.spawned_objectnav.utils import DEFAULT_SCENE_PATH_PREFIX, \
-                                                     DEFAULT_SCENE_PATH_EXT, \
-                                                     DEFAULT_OBJECT_PATH_PREFIX, \
-                                                     DEFAULT_OBJECT_PATH_EXT
+from habitat.datasets.spawned_objectnav.utils import DEFAULT_SCENE_PATH_EXT, \
+                                                     DEFAULT_OBJECT_PATH_EXT, \
+                                                     get_uniform_view_pt_positions, \
+                                                     get_view_pt_rotations, \
+                                                     render_view_pts
 from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
 
@@ -154,8 +155,8 @@ def recompute_navmesh_with_static_objects(sim):
 
 
 def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: np.ndarray,
-                     min_radius: float=0.5, max_radius: float=3.0,
-                     num_radii: int=5, num_angles: int=12,
+                     num_angles: int=20, num_radii: int=10,
+                     min_radius: float=0.5, max_radius: float=3.5,
                      roi: Optional[Tuple[slice, slice]]=None,
                      iou_thresh: Optional[float]=None) -> List[SpawnedObjectGoal]:
     sensor_cfg = sim.habitat_config.DEPTH_SENSOR
@@ -163,63 +164,48 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
         h = sensor_cfg.HEIGHT
         w = sensor_cfg.WIDTH
         s = h // 2
-        roi = (slice((h - s) // 2, (h + s) // 2 + 1), slice((w - s) // 2, (w + s) // 2 + 1))
+        roi_vert = slice((h - s) // 2, (h + s) // 2 + 1)
+        roi_horz = slice((w - s) // 2, (w + s) // 2 + 1)
+    else:
+        roi_vert, roi_horz = roi
 
-    angles = np.linspace(0, 2 * np.pi, num_angles)
-    radii = np.linspace(min_radius, max_radius, num_radii)
-    rel_positions = np.zeros((num_angles * num_radii, 3))
-    rel_positions[:, 0] = np.outer(radii, np.cos(angles)).flatten()
-    rel_positions[:, 2] = np.outer(radii, np.sin(angles)).flatten()
-
+    rel_positions = get_uniform_view_pt_positions(num_angles, num_radii, min_radius, max_radius)
     sensor_pos = np.array(sensor_cfg.POSITION)
     rel_sensor_positions = rel_positions + sensor_pos
 
-    pan = np.arctan2(rel_sensor_positions[:, 0], rel_sensor_positions[:, 2])
-    pan_q = np.zeros((num_angles * num_radii, 4))
-    pan_q[:, 0] = np.cos(0.5 * pan)
-    pan_q[:, 2] = np.sin(0.5 * pan)
-    pan_q = quaternion.from_float_array(pan_q)
+    abs_sensor_rotations = get_view_pt_rotations(rel_sensor_positions)
 
-    hypot = np.hypot(rel_sensor_positions[:, 0], rel_sensor_positions[:, 2])
-    tilt = np.arctan(-rel_sensor_positions[:, 1] / hypot)
-    tilt_q = np.zeros((num_angles * num_radii, 4))
-    tilt_q[:, 0] = np.cos(0.5 * tilt)
-    tilt_q[:, 1] = np.sin(0.5 * tilt)
-    tilt_q = quaternion.from_float_array(tilt_q)
-
-    sensor_rotations = pan_q * tilt_q
-
-    s = sim.get_agent_state()
     max_y = sim.pathfinder.get_bounds()[1][1]
 
     for goal in goals:
         obj_pos = np.array(goal.position)
-        for rel_pos, rot in zip(rel_positions, sensor_rotations):
-            pos = obj_pos + rel_pos
-            if not sim.pathfinder.is_navigable(pos):
-                continue
-            if not np.isfinite(sim.geodesic_distance(start_pos, pos)):
-                continue
+        positions = obj_pos + rel_positions
+        reachable = np.array([sim.pathfinder.is_navigable(pos) \
+                              and np.isfinite(sim.geodesic_distance(start_pos, pos))
+                              for pos in positions])
 
-            s.sensor_states['depth'].position = pos + sensor_pos
-            s.sensor_states['depth'].rotation = rot
-            sim.get_agent(0).set_state(s, False, False)
-            depth_with = sim.get_sensor_observations()['depth']
+        cand_positions = obj_pos + rel_sensor_positions[reachable]
+        cand_rotations = abs_sensor_rotations[reachable]
+        depth_with = render_view_pts(sim, cand_positions, cand_rotations)['depth']
 
-            sim.set_object_motion_type(MotionType.KINEMATIC, goal._spawned_object_id)
-            sim.set_translation([0.0, 2 * max_y, 0.0], goal._spawned_object_id)
-            depth_without = sim.get_sensor_observations()['depth']
-            sim.set_translation(goal.position, goal._spawned_object_id)
-            sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
+        sim.set_object_motion_type(MotionType.KINEMATIC, goal._spawned_object_id)
+        sim.set_translation([0.0, 3 * max_y, 0.0], goal._spawned_object_id)
+        depth_without = render_view_pts(sim, cand_positions, cand_rotations)['depth']
+        sim.set_translation(goal.position, goal._spawned_object_id)
+        sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
 
-            diff = (depth_with != depth_without)
-            diff_roi = diff[roi]
-            iou = diff_roi.sum() / diff_roi.size
-            if (iou_thresh is not None and iou < iou_thresh) or not diff.any():
-                continue
-            goal.view_points.append(ViewPoint(position=(pos + sensor_pos).tolist(),
-                                              rotation=[rot.x, rot.y, rot.z, rot.w],
-                                              iou=iou))
+        diff = (depth_with != depth_without)
+
+        diff_roi = diff[:, roi_vert, roi_horz]
+        scores = diff_roi.sum(axis=(1, 2)) / diff_roi[0].size
+        visible = diff.any(axis=(1, 2)) if iou_thresh is None else scores >= iou_thresh
+
+        goal.view_points = [ViewPoint(position=pos.tolist(),
+                                      rotation=[rot.x, rot.y, rot.z, rot.w],
+                                      iou=iou)
+                            for pos, rot, iou in zip(cand_positions[visible],
+                                                     cand_rotations[visible],
+                                                     scores[visible])]
         if not goal.view_points:
             raise UnreachableGoalError(goal, start_pos)
     return goals

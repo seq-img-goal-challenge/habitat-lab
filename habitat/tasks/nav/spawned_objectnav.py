@@ -15,8 +15,10 @@ from habitat.core.registry import registry
 from habitat.core.utils import not_none_validator
 from habitat.config import Config
 from habitat.tasks.nav.nav import NavigationGoal, NavigationTask
-
-from habitat_sim import NavMeshSettings
+from habitat.datasets.spawned_objectnav.utils import get_random_view_pt_positions, \
+                                                     get_view_pt_rotations, \
+                                                     render_view_pts
+from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
 
 
@@ -36,7 +38,6 @@ class SpawnedObjectGoal(NavigationGoal):
     view_points: List[ViewPoint] = attr.ib(default=None, validator=not_none_validator)
     object_template_id: str
     _spawned_object_id: Optional[int] = attr.ib(init=False, default=None)
-    _appearance_cache: Optional[List[VisualObservation]] = attr.ib(init=False, default=None)
 
     def __getstate__(self):
         return {k: v for k, v in vars(self).items() if not k.startswith('_')}
@@ -44,7 +45,6 @@ class SpawnedObjectGoal(NavigationGoal):
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._spawned_object_id = None
-        self._appearance_cache = None
 
 
 @attr.s(auto_attribs=True, kw_only=True)
@@ -141,6 +141,12 @@ class SpawnedObjectGoalCategorySensor(Sensor):
 
 @registry.register_sensor
 class SpawnedObjectGoalAppearanceSensor(Sensor):
+    _sim: Simulator
+    _sensor_uuid: "str"
+    _oob_pos: np.ndarray
+    _cache_ep_id: Optional[str]
+    _appearance_cache: Optional[np.ndarray]
+
     #TODO (gbono): Make appearance RGB-D? (currently RGB only, like imagegoal)
     def __init__(self, config: Config, sim: Simulator, *args, **kwargs) -> None:
         self._sim = sim
@@ -149,6 +155,10 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
         if self._sensor_uuid is None:
             raise RuntimeError("Could not find a sensor of type 'COLOR'" \
                                + "in the simulator sensor suite")
+        max_y = sim.pathfinder.get_bounds()[1][1]
+        self._oob_pos = np.array([0.0, max_y + 50.0, 0.0])
+        self._cache_ep_id = None
+        self._appearance_cache = None
         super().__init__(config=config, *args, **kwargs)
 
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
@@ -166,7 +176,7 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
 
     def _move_object_out_of_context(self, goal: SpawnedObjectGoal):
         self._sim.set_object_motion_type(MotionType.KINEMATIC, goal._spawned_object_id)
-        self._sim.set_translation(self.config.OUT_OF_CONTEXT_POS, goal._spawned_object_id)
+        self._sim.set_translation(self._oob_pos, goal._spawned_object_id)
 
         if self.config.RANDOM_OBJECT_ROTATION == "3D":
             ax = np.random.randn(3)
@@ -182,64 +192,31 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
                                    goal._spawned_object_id)
         self._sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
 
-    def _render_view(self, position: np.ndarray, rotation: np.quaternion) -> VisualObservation:
-        agent_id = self._sim.habitat_config.DEFAULT_AGENT_ID
-        s = self._sim.get_agent_state(agent_id)
-        s.sensor_states[self._sensor_uuid].position = position
-        s.sensor_states[self._sensor_uuid].rotation = rotation
-        self._sim.get_agent(agent_id).set_state(s, False, False)
-        return self._sim.get_sensor_observations()[self._sensor_uuid][:, :, :3]
-
-    def _generate_views_around_goal(self, goal: SpawnedObjectGoal, num_views: int) -> None:
+    def _render_views_around_goal(self, goal: SpawnedObjectGoal, num_views: int) -> None:
         if self.config.OUT_OF_CONTEXT:
             self._move_object_out_of_context(goal)
 
-            r = (self.config.MAX_VIEW_DISTANCE - self.config.MIN_VIEW_DISTANCE) \
-                    * np.random.random(num_views) + self.config.MIN_VIEW_DISTANCE
-            a = 2 * np.pi * np.random.random(num_views)
-
-            rel_pos = np.zeros((num_views, 3))
-            rel_pos[:, 0] = r * np.cos(a)
-            rel_pos[:, 2] = r * np.sin(a)
-            sensor = self._sim.sensor_suite.sensors[self._sensor_uuid]
-            rel_pos += np.array(sensor.config.POSITION)
-
-            pan = np.arctan2(rel_pos[:, 0], rel_pos[:, 2])
-            pan_q = np.zeros((num_views, 4))
-            pan_q[:, 0] = np.cos(0.5 * pan)
-            pan_q[:, 2] = np.sin(0.5 * pan)
-            pan_q = quaternion.from_float_array(pan_q)
-
-            hypot = np.hypot(rel_pos[:, 0], rel_pos[:, 2])
-            tilt = np.arctan(-rel_pos[:, 1] / hypot)
-            tilt_q = np.zeros((num_views, 4))
-            tilt_q[:, 0] = np.cos(0.5 * tilt)
-            tilt_q[:, 1] = np.sin(0.5 * tilt)
-            tilt_q = quaternion.from_float_array(tilt_q)
-
-            positions = np.array(self.config.OUT_OF_CONTEXT_POS) + rel_pos
-            rotations = pan_q * tilt_q
-            goal._appearance_cache = [self._render_view(pos, rot)
-                                      for pos, rot in zip(positions, rotations)]
+            rel_positions = get_random_view_pt_positions(num_views)
+            rotations = get_view_pt_rotations(rel_positions)
+            views = render_view_pts(self._sim, self._oob_pos + rel_positions, rotations)
 
             self._restore_object_in_context(goal)
         else:
-            view_points = np.random.choice(goal.view_points, num_views, False)
-            goal._appearance_cache = [self._render_view(np.array(view_pt.position),
-                                                        np.quaternion(view_pt.rotation[3],
-                                                                      *view_pt.rotation[:3]))
-                                      for view_pt in view_points]
+            view_points = np.random.choice(goal.view_points, num_views, True)
+            positions = np.array([view_pt.position for view_pt in view_points])
+            rotations = np.array([view_pt.rotation for view_pt in view_points])
+            rotations = quaternion.from_float_array(rotations[:, [3, 0, 1, 2]])
+            views = render_view_pts(self._sim, positions, rotations)
+        return views['rgb'][..., :3]
 
     def get_observation(self, episode: SpawnedObjectNavEpisode,
                         *args, **kwargs) -> VisualObservation:
-        if any(goal._appearance_cache is None for goal in episode.goals):
+        if self._cache_ep_id is None or self._cache_ep_id != episode.episode_id:
+            views = []
             num_views_per_goal, more_views = divmod(self.config.NUM_VIEWS, len(episode.goals))
             for k, goal in enumerate(episode.goals):
                 num_views = num_views_per_goal + (1 if k < more_views else 0)
-                self._generate_views_around_goal(goal, num_views)
-            #TODO (gbono): what if some goal is barely visible from any points?
-            # should we enforce balance of num_views between goals or not?
-        views = np.array(list(chain.from_iterable(goal._appearance_cache
-                                                  for goal in episode.goals)))
-        # TODO (gbono): cache the concatenated array, not just the goal views...)
-        return views
+                views.append(self._render_views_around_goal(goal, num_views))
+            self._cache_ep_id = episode.episode_id
+            self._appearance_cache = np.concatenate(views, 0)
+        return self._appearance_cache
