@@ -77,8 +77,7 @@ def test_generate_dataset():
                 assert goal.object_template_id.endswith(OBJECT_EXT)
                 assert os.path.isfile(goal.object_template_id)
                 assert goal._spawned_object_id is None
-                assert goal._appearance_cache is None
-                assert 0 < len(goal.view_points) <= 60
+                assert 0 < len(goal.view_points) <= 200
 
 
 
