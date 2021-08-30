@@ -5,6 +5,7 @@ import os
 import gzip
 
 import numpy as np
+import tqdm
 
 import habitat
 from habitat.core.simulator import Simulator
@@ -46,7 +47,7 @@ def generate_sequential_objectnav_episode(sim: Simulator,
         prv_len = nxt_len
 
     errors = []
-    for _ in range(num_retries):
+    for retry in range(num_retries):
         try:
             goals = generate_spawned_objectgoals(sim, start_pos, all_tmpl_ids,
                                                  rotate_objects, rng)
@@ -96,24 +97,26 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
     object_pool = create_object_pool(objects_dir)
 
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
-    for k, scene in enumerate(scene_pool):
-        if num_ep_per_scene == 0 and k >= more_ep:
-            break
-        cfg.SIMULATOR.defrost()
-        cfg.SIMULATOR.SCENE = scene
-        cfg.freeze()
-        with habitat.sims.make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
-            if seed is not None:
-                sim.seed(seed + k)
-            for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
-                episode = generate_sequential_objectnav_episode(sim, next(ep_id),
-                                                                min_seq_len, max_seq_len,
-                                                                max_goals,
-                                                                object_pool,
-                                                                rotate_objects,
-                                                                num_retries,
-                                                                rng)
-                new_episodes.append(episode)
+    with tqdm.tqdm(total=num_episodes) as progress:
+        for k, scene in enumerate(scene_pool):
+            if num_ep_per_scene == 0 and k >= more_ep:
+                break
+            cfg.SIMULATOR.defrost()
+            cfg.SIMULATOR.SCENE = scene
+            cfg.freeze()
+            with habitat.sims.make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+                if seed is not None:
+                    sim.seed(seed + k)
+                for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
+                    episode = generate_sequential_objectnav_episode(sim, next(ep_id),
+                                                                    min_seq_len, max_seq_len,
+                                                                    max_goals,
+                                                                    object_pool,
+                                                                    rotate_objects,
+                                                                    num_retries,
+                                                                    rng)
+                    new_episodes.append(episode)
+                    progress.update()
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with gzip.open(out_path, 'wt') as f:
