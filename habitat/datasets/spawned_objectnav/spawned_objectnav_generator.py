@@ -183,6 +183,8 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
         reachable = np.array([sim.pathfinder.is_navigable(pos) \
                               and np.isfinite(sim.geodesic_distance(start_pos, pos))
                               for pos in positions])
+        if not reachable.any():
+            raise UnreachableGoalError(goal, start_pos)
 
         cand_positions = obj_pos + rel_sensor_positions[reachable]
         cand_rotations = abs_sensor_rotations[reachable]
