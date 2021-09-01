@@ -936,7 +936,7 @@ class PPOTrainer(BaseRLTrainer):
                     test_recurrent_hidden_states,
                     prev_actions,
                     not_done_masks,
-                    deterministic=False,
+                    deterministic=self.config.EVAL.DETERMINISTIC,
                 )
 
                 prev_actions.copy_(actions)  # type: ignore
