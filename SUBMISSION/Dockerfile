@@ -1,0 +1,17 @@
+FROM nvidia/cudagl:11.1.1-devel-ubuntu20.04
+
+RUN apt-get update && \
+    DEBIAN_FRONTEND="noninteractive" apt-get install -y --no-install-recommends \
+        python3 python3-pip python3-setuptools python3-wheel && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --no-cache-dir numpy gym && \
+    python3 -m pip install --no-cache-dir torch==1.9.0+cu111 \
+                                          torchvision==0.10.0+cu111 \
+                           -f https://download.pytorch.org/whl/torch_stable.html
+
+ADD ./SUBMISSION /SUBMISSION
+ADD ./scripts/seq_objnav_rpc_eval/run_agent.py /
+
+ENTRYPOINT ["python3", "run_agent.py"]
+CMD []

@@ -24,3 +24,6 @@ RUN cd habitat-lab && \
     python3 setup.py develop --all
 
 ENV GLOG_minloglevel=2 MAGNUM_LOG="quiet"
+
+ENTRYPOINT ["python3", "/habitat-lab/scripts/seq_objnav_rpc_eval/run_benchmark.py"]
+CMD []
