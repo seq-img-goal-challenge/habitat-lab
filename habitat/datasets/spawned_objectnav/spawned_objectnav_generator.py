@@ -3,6 +3,7 @@ import argparse
 import enum
 import sys
 import os
+import glob
 import itertools
 import gzip
 
@@ -98,8 +99,8 @@ def create_object_pool(objects_dir: str) -> List[ObjectPoolCategory]:
 
 
 def create_scene_pool(scenes_dir: str) -> List[str]:
-    return sorted(entry.path for entry in os.scandir(scenes_dir)
-                  if entry.is_file() and entry.name.endswith(DEFAULT_SCENE_PATH_EXT))
+    return sorted(glob.glob(os.path.join(scenes_dir, "**", f"*{DEFAULT_SCENE_PATH_EXT}"),
+                            recursive=True))
 
 
 def spawn_objects(sim: Simulator,
