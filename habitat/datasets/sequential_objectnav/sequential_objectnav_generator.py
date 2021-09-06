@@ -108,14 +108,17 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
                 if seed is not None:
                     sim.seed(seed + k)
                 for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
-                    episode = generate_sequential_objectnav_episode(sim, next(ep_id),
-                                                                    min_seq_len, max_seq_len,
-                                                                    max_goals,
-                                                                    object_pool,
-                                                                    rotate_objects,
-                                                                    num_retries,
-                                                                    rng)
-                    new_episodes.append(episode)
+                    try:
+                        episode = generate_sequential_objectnav_episode(sim, next(ep_id),
+                                                                        min_seq_len, max_seq_len,
+                                                                        max_goals,
+                                                                        object_pool,
+                                                                        rotate_objects,
+                                                                        num_retries,
+                                                                        rng)
+                        new_episodes.append(episode)
+                    except MaxRetriesError as e:
+                        print(e)
                     progress.update()
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
