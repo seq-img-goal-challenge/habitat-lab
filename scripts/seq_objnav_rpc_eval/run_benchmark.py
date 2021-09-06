@@ -1,0 +1,21 @@
+import argparse
+import json
+
+from habitat.utils.local_rpc_evaluation import run_rpc_benchmark, DEFAULT_RPC_PORT
+
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config-path", "-c")
+    parser.add_argument("--num-episodes", "-n", default=10)
+    parser.add_argument("--port", "-p", type=int, default=DEFAULT_RPC_PORT)
+    return parser.parse_args()
+
+
+def main(args):
+    metrics = run_rpc_benchmark(args.config_path, args.num_episodes, args.port)
+    print("METRICS >>>", json.dumps(metrics))
+
+
+if __name__ == "__main__":
+    main(parse_args())
