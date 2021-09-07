@@ -55,7 +55,8 @@ def generate_sequential_objectnav_episode(sim: Simulator,
         except UnreachableGoalError as e:
             errors.append(e)
     else:
-        raise MaxRetriesError("generate reachable goals", num_retries, errors)
+        short_scene, _ = os.path.splitext(os.path.basename(sim.habitat_config.SCENE))
+        raise MaxRetriesError(f"generate reachable goals in scene '{short_scene}'", num_retries, errors)
     steps = [SequentialObjectNavStep(object_category=category,
                                      object_category_index=cat_index,
                                      goals=goals[first:last])
