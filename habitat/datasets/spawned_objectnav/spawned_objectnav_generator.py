@@ -70,8 +70,10 @@ class UnreachableGoalError(Exception):
 
     def __str__(self) -> str:
         cat = self.goal.object_template_id.split('/')[-2]
-        return f"Could not find view points reachable from {self.start_pos} " \
-                + f"for goal '{cat}' at position {self.goal.position}."
+        s_pos_str = '[' + ','.join(f"{x:.3f}" for x in self.start_pos) + ']'
+        g_pos_str = '[' + ','.join(f"{x:.3f}" for x in self.goal.position) + ']'
+        return f"Could not find view points reachable from {s_pos_str} " \
+                + f"for goal '{cat}' at position {g_pos_str}."
 
 
 class MaxRetriesError(Exception):
