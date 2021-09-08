@@ -108,4 +108,6 @@ def render_view_pts(sim: HabitatSim, abs_pos: np.ndarray, abs_rot: np.ndarray) \
         obs = sim.get_sensor_observations()
         for uuid in s.sensor_states:
             observations[uuid].append(obs[uuid])
+    s.sensor_states = {}
+    sim.get_agent(0).set_state(s)
     return {uuid: np.stack(obs, 0) for uuid, obs in observations.items()}

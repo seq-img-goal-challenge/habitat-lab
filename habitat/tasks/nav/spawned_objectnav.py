@@ -93,7 +93,9 @@ class SpawnedObjectNavTask(NavigationTask):
         for goal in episode.goals:
             mngr_id = self._loaded_object_templates[goal.object_template_id]
             goal._spawned_object_id = self._sim.add_object(mngr_id)
-            self._sim.set_translation(goal.position, goal._spawned_object_id)
+            bb = self._sim.get_object_scene_node(goal._spawned_object_id).cumulative_bb
+            shift = np.array([0, bb.bottom, 0])
+            self._sim.set_translation(goal.position - shift, goal._spawned_object_id)
             self._sim.set_rotation(mn.Quaternion(goal.rotation[:3], goal.rotation[3]),
                                    goal._spawned_object_id)
             self._sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
