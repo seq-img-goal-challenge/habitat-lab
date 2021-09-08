@@ -28,6 +28,45 @@ from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
 
 
+_debug_cnt = 0
+def _debug_render(sim, distrib, goals, error):
+    import cv2
+
+    def put_text(disp, txt, emph=False):
+        thick = 2 if emph else 1
+        (w, h), b = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 1, thick)
+        cv2.putText(disp, txt, (j - w // 2, i - b),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), thick)
+
+    d = distrib.get_spatial_distribution()
+    m = distrib.get_nav_mask()
+    disp = cv2.applyColorMap((d * 255 / d.max()).astype(np.uint8), cv2.COLORMAP_JET)
+    disp[~m] = 0
+    new_m = sim.pathfinder.get_topdown_view(distrib.resolution, distrib.height)
+    disp[m & ~new_m] //= 2
+    i, j = distrib.world_to_map(error.start_pos)
+    cv2.circle(disp, (j, i), 5, (0, 255, 0), 2)
+    put_text(disp, "START", False)
+    for goal in goals:
+        cat = goal.object_template_id.split('/')[-2]
+        i, j = distrib.world_to_map(np.array(goal.position))
+        cv2.circle(disp, (j, i), 5, (0, 0, 255), 2)
+        put_text(disp, cat, goal is error.goal)
+
+        t, l = distrib.world_to_map(goal.position + np.array(goal._debug_bb.min))
+        b, r = distrib.world_to_map(goal.position + np.array(goal._debug_bb.max))
+        cv2.rectangle(disp, (l, t), (r, b), (225, 0, 255))
+
+        for view_pt in goal.view_points:
+            i, j = distrib.world_to_map(view_pt.position)
+            cv2.circle(disp, (j, i), 3, (0, 255, 255), 2)
+
+    global _debug_cnt
+    outpath = f"TEMP/DEBUG_render_{_debug_cnt}.png"
+    _debug_cnt += 1
+    cv2.imwrite(outpath, disp)
+
+
 class ObjectPoolCategory:
     name: str
     index: int
@@ -52,11 +91,17 @@ class ObjectRotation(enum.Enum):
     VERTICAL = enum.auto()
     FREE = enum.auto()
 
+    def __str__(self):
+        return self.name
+
 
 class ExistBehavior(enum.Enum):
     ABORT = enum.auto()
     OVERRIDE = enum.auto()
     APPEND = enum.auto()
+
+    def __str__(self):
+        return self.name
 
 
 class UnreachableGoalError(Exception):
@@ -134,7 +179,9 @@ def spawn_objects(sim: Simulator,
     for obj_pos, obj_rot, tmpl_id in zip(positions, rotations, template_ids):
         mngr_id, = mngr.load_configs(tmpl_id)
         obj_id = sim.add_object(mngr_id)
-        sim.set_translation(obj_pos, obj_id)
+        obj_node = sim.get_object_scene_node(obj_id)
+        shift = np.array([0, obj_node.cumulative_bb.bottom, 0])
+        sim.set_translation(obj_pos - shift, obj_id)
         sim.set_rotation(obj_rot, obj_id)
         sim.set_object_motion_type(MotionType.STATIC, obj_id)
 
@@ -143,6 +190,9 @@ def spawn_objects(sim: Simulator,
                                  object_template_id=tmpl_id,
                                  view_points=[])
         goal._spawned_object_id = obj_id
+        ## DEBUG
+        goal._debug_bb = obj_node.cumulative_bb
+        ##
         goals.append(goal)
     return goals
 
@@ -216,6 +266,12 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
     return goals
 
 
+def clear_sim_from_objects(sim):
+    for obj_id in sim.get_existing_object_ids():
+        sim.remove_object(obj_id)
+    sim.get_object_template_manager().remove_all_templates()
+
+
 def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
                                  template_ids: List[str], rotate_objects: ObjectRotation,
                                  rng: np.random.Generator) -> List[SpawnedObjectGoal]:
@@ -223,7 +279,13 @@ def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
     positions = distrib.sample_reachable_from_position(len(template_ids), start_pos, rng)
     goals = spawn_objects(sim, template_ids, positions, rotate_objects, rng)
     recompute_navmesh_with_static_objects(sim)
-    goals = find_view_points(sim, goals, start_pos)
+    try:
+        goals = find_view_points(sim, goals, start_pos)
+    except UnreachableGoalError as e:
+        _debug_render(sim, distrib, goals, e)
+        raise
+    finally:
+        clear_sim_from_objects(sim)
     return goals
 
 
@@ -234,7 +296,10 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                        rotate_objects: ObjectRotation,
                                        num_retries: int,
                                        rng: np.random.Generator) -> SpawnedObjectNavEpisode:
+    height = sim.get_agent_state().position[1]
     start_pos = sim.sample_navigable_point()
+    while abs(start_pos[1] - height) > 0.05:
+        start_pos = sim.sample_navigable_point()
     a = 2 * np.pi * rng.random()
     start_rot = [*(np.sin(0.5 * a) * sim.up_vector), np.cos(0.5 * a)]
 
@@ -291,20 +356,29 @@ def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str]
     rng.shuffle(object_pool)
 
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
-    for k, scene in enumerate(scene_pool):
-        if num_ep_per_scene == 0 and k >= more_ep:
-            break
-        cfg.SIMULATOR.defrost()
-        cfg.SIMULATOR.SCENE = scene
-        cfg.freeze()
-        with habitat.sims.make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
-            if seed is not None:
-                sim.seed(seed + k)
-            for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
-                episode = generate_spawned_objectnav_episode(sim, next(ep_id_gen), max_goals,
-                                                             object_pool, rotate_objects,
-                                                             num_retries, rng)
-                new_episodes.append(episode)
+    with tqdm.tqdm(total=num_episodes) as progress:
+        for k, scene in enumerate(scene_pool):
+            if num_ep_per_scene == 0 and k >= more_ep:
+                break
+            cfg.SIMULATOR.defrost()
+            cfg.SIMULATOR.SCENE = scene
+            cfg.freeze()
+            with habitat.sims.make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+                if seed is not None:
+                    sim.seed(seed + k)
+                for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
+                    try:
+                        episode = generate_spawned_objectnav_episode(sim,
+                                                                     next(ep_id_gen),
+                                                                     max_goals,
+                                                                     object_pool,
+                                                                     rotate_objects,
+                                                                     num_retries,
+                                                                     rng)
+                        new_episodes.append(episode)
+                    except MaxRetriesError as e:
+                        print(e)
+                    progress.update()
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with gzip.open(out_path, 'wt') as f:
@@ -342,4 +416,6 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    import logging
+    habitat.logger.setLevel(logging.ERROR)
     generate_spawned_objectnav_dataset(**vars(_parse_args()))

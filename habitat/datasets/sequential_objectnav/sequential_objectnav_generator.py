@@ -27,7 +27,10 @@ def generate_sequential_objectnav_episode(sim: Simulator,
                                           num_retries: int,
                                           rng: np.random.Generator) \
                                          -> SequentialObjectNavEpisode:
+    height = sim.get_agent_state().position[1]
     start_pos = sim.sample_navigable_point()
+    while abs(start_pos[1] - height) > 0.05:
+        start_pos = sim.sample_navigable_point()
     a = 2 * np.pi * rng.random()
     start_rot = [*(np.sin(0.5 * a) * sim.up_vector), np.cos(0.5 * a)]
 
@@ -161,4 +164,6 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
 
 
 if __name__ == "__main__":
+    import logging
+    habitat.logger.setLevel(logging.ERROR)
     generate_sequential_objectnav_dataset(**vars(_parse_args()))

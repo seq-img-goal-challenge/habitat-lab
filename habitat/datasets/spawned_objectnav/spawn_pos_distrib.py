@@ -105,8 +105,9 @@ class SpawnPositionDistribution:
 
     def _update_edges(self) -> None:
         self._nav_mask = self._sim.pathfinder.get_topdown_view(self._resolution, self._height)
-        edges = (self._nav_mask[:-1, :-1] != self._nav_mask[:-1, 1:]) \
-                | (self._nav_mask[:-1, :-1] != self._nav_mask[1:, :-1])
+        edges = np.zeros_like(self._nav_mask)
+        edges[:-1, :-1] = (self._nav_mask[:-1, :-1] != self._nav_mask[:-1, 1:]) \
+                        | (self._nav_mask[:-1, :-1] != self._nav_mask[1:, :-1])
         self._edges = edges.astype(np.float32)
         self._update_distrib()
         self._reset_conn_comp()
@@ -115,7 +116,7 @@ class SpawnPositionDistribution:
         ker_sigma = 0.2 * self._inflate_radius / self._resolution
         distrib = sp_img.gaussian_filter(self._edges, ker_sigma, mode='constant', truncate=5)
         distrib += self._epsilon
-        distrib[~self._nav_mask[:-1, :-1]] = 0
+        distrib[~self._nav_mask] = 0
         self._distrib = distrib
         self._cumul = self._distrib.flatten().cumsum()
 
@@ -125,7 +126,7 @@ class SpawnPositionDistribution:
         self._num_conn_comp = 0
 
     def _update_conn_comp(self) -> None:
-        labels, num_labels = sp_img.label(self._nav_mask[:-1, :-1], np.ones((3, 3)))
+        labels, num_labels = sp_img.label(self._nav_mask, np.ones((3, 3)))
         masks = labels[:, :, np.newaxis] == 1 + np.arange(num_labels)
         areas = masks.sum(axis=(0, 1)) * self._resolution**2
         conn_comp_filter = areas > self._margin**2
@@ -134,6 +135,9 @@ class SpawnPositionDistribution:
         self._conn_comp_weights = areas / areas.sum()
         self._num_conn_comp, = areas.shape
 
+    def get_nav_mask(self) -> np.ndarray:
+        return self._nav_mask.copy()
+
     def get_origin(self) -> np.ndarray:
         return self._origin.copy()
 
@@ -141,7 +145,7 @@ class SpawnPositionDistribution:
         return self._edges.copy()
 
     def get_spatial_distribution(self) -> np.ndarray:
-        return self._distrib / self._distrib.sum()
+        return self._distrib / self._cumul[-1]
 
     def get_num_connected_components(self) -> int:
         if self._conn_comp_masks is None:
