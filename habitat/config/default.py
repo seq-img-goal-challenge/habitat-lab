@@ -230,6 +230,11 @@ _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.MIN_VIEW_DISTANCE = 0.5
 _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.MAX_VIEW_DISTANCE = 3.0
 _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.RANDOM_OBJECT_ROTATION = "DISABLE"
 # -----------------------------------------------------------------------------
+# DISTANCE TO OBJECT MEASURE
+# -----------------------------------------------------------------------------
+_C.TASK.DISTANCE_TO_OBJECT = CN()
+_C.TASK.DISTANCE_TO_OBJECT.TYPE = "DistanceToObject"
+# -----------------------------------------------------------------------------
 # SEQUENTIAL NAV TASK
 # -----------------------------------------------------------------------------
 # -----------------------------------------------------------------------------
@@ -301,6 +306,11 @@ _C.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE = _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE
 _C.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.TYPE = "SequentialObjectGoalAppearanceSensor"
 _C.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.PADDING_VALUE = 0
 _C.TASK.SEQUENTIAL_OBJECTGOAL_APPEARANCE.SEQUENTIAL_MODE = "FULL"
+# -----------------------------------------------------------------------------
+# DISTANCE TO NEXT OBJECT MEASURE
+# -----------------------------------------------------------------------------
+_C.TASK.DISTANCE_TO_NEXT_OBJECT = CN()
+_C.TASK.DISTANCE_TO_NEXT_OBJECT.TYPE = "DistanceToNextObject"
 
 # -----------------------------------------------------------------------------
 # SIMULATOR

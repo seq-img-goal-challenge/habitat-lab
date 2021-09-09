@@ -46,7 +46,7 @@ def test_spawn_pos_distrib_init():
 
         assert distrib._edges is not None
         assert isinstance(distrib._edges, np.ndarray)
-        assert distrib._edges.shape == distrib._nav_mask[:-1, :-1].shape
+        assert distrib._edges.shape == distrib._nav_mask.shape
         assert distrib._edges.dtype == np.float32
         assert np.all((distrib._edges == 0) | (distrib._edges == 1))
 
@@ -126,7 +126,7 @@ def test_spawn_pos_distrib_conn_comp():
         assert isinstance(distrib._conn_comp_masks, np.ndarray)
         assert distrib._conn_comp_masks.shape == distrib._distrib.shape + (n_cc,)
         assert distrib._conn_comp_masks.dtype == np.bool
-        assert np.all(distrib._conn_comp_masks.any(axis=-1) == distrib._nav_mask[:-1, :-1])
+        assert np.all(distrib._conn_comp_masks.any(axis=-1) == distrib._nav_mask)
 
         assert distrib._conn_comp_weights is not None
         assert isinstance(distrib._conn_comp_masks, np.ndarray)
@@ -335,7 +335,7 @@ def test_spawn_objects_fixed_rot():
             assert sim.get_object_motion_type(goal._spawned_object_id) == MotionType.STATIC
 
             node = sim.get_object_scene_node(goal._spawned_object_id)
-            assert np.allclose(node.translation, pos)
+            assert np.allclose(node.translation, pos - [0, node.cumulative_bb.bottom, 0])
             assert np.allclose([*node.rotation.vector, node.rotation.scalar], [0, 0, 0, 1])
 
 
@@ -367,7 +367,7 @@ def test_spawn_objects_vertical_rot():
             assert np.isclose(goal.rotation[1]**2 + goal.rotation[3]**2, 1)
 
             node = sim.get_object_scene_node(goal._spawned_object_id)
-            assert np.allclose(node.translation, goal.position)
+            assert np.allclose(node.translation, np.array(goal.position) - [0, node.cumulative_bb.bottom, 0])
             assert np.allclose([*node.rotation.vector, node.rotation.scalar], goal.rotation)
 
 
@@ -397,7 +397,7 @@ def test_spawn_objects_free_rot():
             assert np.isclose(np.linalg.norm(goal.rotation), 1)
 
             node = sim.get_object_scene_node(goal._spawned_object_id)
-            assert np.allclose(node.translation, goal.position)
+            assert np.allclose(node.translation, np.array(goal.position) - [0, node.cumulative_bb.bottom, 0])
             assert np.allclose([*node.rotation.vector, node.rotation.scalar], goal.rotation)
 
 
