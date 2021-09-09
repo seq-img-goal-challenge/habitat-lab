@@ -113,7 +113,8 @@ class SpawnedObjectNavTask(NavigationTask):
         self._despawn_objects()
         self._reload_templates(episode)
         self._spawn_objects(episode)
-        self._recompute_navmesh_for_static_objects()
+        if self._config.ENABLE_OBJECT_COLLISIONS:
+            self._recompute_navmesh_for_static_objects()
         return super().reset(episode)
 
 
