@@ -164,17 +164,22 @@ class SequentialNavRLEnv(NavRLEnv):
         reward = self._rl_config.SLACK_REWARD
         m = self._env.get_metrics()
 
-        progress_delta = m[self._seq_reward_measure_name] - self._prv_seq_measure
+        cur_measure = m[self._reward_measure_name]
+        cur_seq_measure = m[self._seq_reward_measure_name]
+
+        progress_delta = cur_seq_measure - self._prv_seq_measure
         if progress_delta > 0: # Progress can only increase
             reward += progress_delta
             self._prv_seq_measure = cur_seq_measure
             # Reset reward measure if some progress was made
+            # (otherwise would penalize going to next step...)
             self._previous_measure = cur_measure
 
         # Assume reward measure is similar to a distance to goal
         # hence, encourage a decrease in measure and penalize an increase
-        measure_delta = m[self._reward_measure_name] - self._previous_measure
+        measure_delta = cur_measure - self._previous_measure
         reward -= measure_delta
+        self._previous_measure = cur_measure
 
         # Add a sparse success reward
         success = m[self._success_measure_name]
