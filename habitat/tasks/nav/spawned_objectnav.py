@@ -1,7 +1,5 @@
 from typing import List, Dict, Any, Optional
 import attr
-from copy import deepcopy
-from itertools import chain
 
 import numpy as np
 import quaternion
@@ -9,12 +7,13 @@ import magnum as mn
 from gym import Space, spaces
 
 from habitat.core.dataset import Episode
+from habitat.core.embodied_task import Measure
 from habitat.core.simulator import Simulator, Sensor, SensorTypes, \
                                    VisualObservation, Observations
 from habitat.core.registry import registry
 from habitat.core.utils import not_none_validator
 from habitat.config import Config
-from habitat.tasks.nav.nav import NavigationGoal, NavigationTask
+from habitat.tasks.nav.nav import NavigationGoal, NavigationTask, DistanceToGoal
 from habitat.datasets.spawned_objectnav.utils import get_random_view_pt_positions, \
                                                      get_view_pt_rotations, \
                                                      render_view_pts
@@ -222,3 +221,42 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
             self._cache_ep_id = episode.episode_id
             self._appearance_cache = np.concatenate(views, 0)
         return self._appearance_cache
+
+
+@registry.register_measure
+class DistanceToObject(Measure):
+    _sim: Simulator
+    _metric: float
+    _last_pos: Optional[np.ndarray]
+    _ep_targets: List[List[float]]
+
+    def __init__(self, sim: Simulator, *args: Any, **kwargs: Any) -> None:
+        super().__init__()
+        self._sim = sim
+        self._last_pos = None
+        self._ep_targets = []
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return DistanceToGoal.cls_uuid
+
+    def _get_targets_for_goal(self, goal: SpawnedObjectGoal):
+        bb = self._sim.get_object_scene_node(goal._spawned_object_id).cumulative_bb
+        shifts = np.array([[x, 0, z] for x in (0, bb.left, bb.right)
+                                     for z in (0, bb.back, bb.front)])
+        targets = np.array(goal.position)[None, :] + shifts
+        return targets.tolist()
+
+    def reset_metric(self, episode: SpawnedObjectNavEpisode,
+                     *args: Any, **kwargs: Any) -> None:
+        self._ep_targets = []
+        for goal in episode.goals:
+            self._ep_targets.extend(self._get_targets_for_goal(goal))
+        self._last_pos = self._sim.get_agent_state().position
+        self._metric = self._sim.geodesic_distance(self._last_pos, self._ep_targets)
+
+    def update_metric(self, episode: SpawnedObjectNavEpisode,
+                      *args: Any, **kwargs: Any) -> None:
+        pos = self._sim.get_agent_state().position
+        if not np.allclose(pos, self._last_pos):
+            self._metric = self._sim.geodesic_distance(pos, self._ep_targets)
+            self._last_pos = pos

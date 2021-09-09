@@ -150,7 +150,7 @@ class DistanceToNextGoal(Measure):
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
         return self.cls_uuid
 
-    def _compute_distance(self, pos, episode: SequentialEpisode) -> float:
+    def _compute_distance(self, pos: np.ndarray, episode: SequentialEpisode) -> float:
         idx = min(episode._current_step_index, episode.num_steps - 1)
         step_goals = episode.steps[idx].goals
         return self._sim.geodesic_distance(pos, [goal.position for goal in step_goals])

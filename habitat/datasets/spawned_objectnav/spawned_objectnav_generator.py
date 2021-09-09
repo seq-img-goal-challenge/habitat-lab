@@ -11,6 +11,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 import quaternion
 import magnum as mn
+import tqdm
 
 import habitat
 from habitat.core.simulator import Simulator
