@@ -1,3 +1,5 @@
+# SIG challenge habitat-environment docker image for evaluation
+
 FROM nvidia/cudagl:11.1-devel-ubuntu20.04
 
 RUN apt-get update && \

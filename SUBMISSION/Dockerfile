@@ -1,3 +1,5 @@
+# SIG challenge agent docker image for submission
+
 FROM nvidia/cudagl:11.1.1-devel-ubuntu20.04
 
 RUN apt-get update && \
