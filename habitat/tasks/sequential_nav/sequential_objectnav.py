@@ -1,8 +1,10 @@
-from typing import List
+from typing import List, Any
 
 import attr
+import numpy as np
 
 from habitat.core.registry import registry
+from habitat.core.simulator import Simulator
 from habitat.core.utils import not_none_validator
 from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, \
                                                 SpawnedObjectGoalCategorySensor, \
