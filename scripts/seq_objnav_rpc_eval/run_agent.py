@@ -19,14 +19,20 @@ def _deserialize_visual_observations(buf):
 
 def run_rpc_agent(agent, port=DEFAULT_RPC_PORT):
     with xmlrpc.server.SimpleXMLRPCServer(("localhost", port),
-                                          logRequests=False, allow_none=True) as rpc_server:
+                                          logRequests=False,
+                                          allow_none=True,
+                                          use_builtin_types=True) as rpc_server:
+        @rpc_server.register_function
+        def check_init():
+            return True
+
         @rpc_server.register_function
         def reset():
             agent.reset()
 
         @rpc_server.register_function
         def act(serialized_obs):
-            obs = _deserialize_visual_observations(serialized_obs.data)
+            obs = _deserialize_visual_observations(serialized_obs)
             return agent.act(obs)
 
         @rpc_server.register_function
