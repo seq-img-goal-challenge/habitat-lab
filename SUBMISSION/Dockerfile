@@ -14,6 +14,7 @@ RUN python3 -m pip install --no-cache-dir numpy gym && \
 
 ADD ./SUBMISSION /SUBMISSION
 ADD ./scripts/seq_objnav_rpc_eval/run_agent.py /
+ADD ./scripts/seq_objnav_rpc_eval/entry_point_agent.sh /
 
-ENTRYPOINT ["python3", "run_agent.py"]
+ENTRYPOINT ["/bin/bash", "/entry_point_agent.sh"]
 CMD []
