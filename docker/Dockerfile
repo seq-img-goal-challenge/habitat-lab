@@ -27,5 +27,5 @@ RUN cd habitat-lab && \
 
 ENV GLOG_minloglevel=2 MAGNUM_LOG="quiet"
 
-ENTRYPOINT ["python3", "/habitat-lab/scripts/seq_objnav_rpc_eval/run_benchmark.py"]
+ENTRYPOINT ["/bin/bash", "/habitat-lab/scripts/seq_objnav_rpc_eval/entry_point_eval.sh"]
 CMD []
