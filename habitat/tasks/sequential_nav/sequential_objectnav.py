@@ -50,7 +50,7 @@ class DistanceToNextObject(DistanceToNextGoal):
         self._step_targets = []
 
     def _get_targets_for_goal(self, goal: SpawnedObjectGoal):
-        bb = self._sim.get_object_scene_node(goal._spawned_object_id).cumulative_bb
+        bb = goal._bounding_box
         shifts = np.array([[x, 0, z] for x in (0, bb.left, bb.right)
                                      for z in (0, bb.back, bb.front)])
         targets = np.array(goal.position)[None, :] + shifts

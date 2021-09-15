@@ -54,8 +54,8 @@ def _debug_render(sim, distrib, goals, error):
         cv2.circle(disp, (j, i), 5, (0, 0, 255), 2)
         put_text(disp, cat, goal is error.goal)
 
-        t, l = distrib.world_to_map(goal.position + np.array(goal._debug_bb.min))
-        b, r = distrib.world_to_map(goal.position + np.array(goal._debug_bb.max))
+        t, l = distrib.world_to_map(goal.position + np.array(goal._bounding_box.min))
+        b, r = distrib.world_to_map(goal.position + np.array(goal._bounding_box.max))
         cv2.rectangle(disp, (l, t), (r, b), (225, 0, 255))
 
         for view_pt in goal.view_points:
@@ -191,10 +191,9 @@ def spawn_objects(sim: Simulator,
                                  object_template_id=tmpl_id,
                                  view_points=[])
         goal._spawned_object_id = obj_id
-        ## DEBUG
-        goal._debug_bb = obj_node.cumulative_bb
-        ##
+        goal._bounding_box = obj_node.cumulative_bb
         goals.append(goal)
+
     return goals
 
 
@@ -206,6 +205,17 @@ def recompute_navmesh_with_static_objects(sim):
     settings.agent_radius = ag_cfg.RADIUS
     settings.agent_height = ag_cfg.HEIGHT
     sim.recompute_navmesh(sim.pathfinder, settings, True)
+
+
+def check_reachability(sim: Simulator, goals: List[SpawnedObjectGoal],
+                       start_pos: np.ndarray) -> None:
+    for goal in goals:
+        bb = goal._bounding_box
+        shifts = np.array([[x, 0, z] for x in (0, bb.left, bb.right)
+                                     for z in (0, bb.back, bb.front)])
+        targets = np.array(goal.position)[None, :] + shifts
+        if not np.isfinite(sim.geodesic_distance(start_pos, targets)):
+            raise UnreachableGoalError(goal, start_pos)
 
 
 def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: np.ndarray,
@@ -276,17 +286,17 @@ def clear_sim_from_objects(sim):
 def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
                                  template_ids: List[str], rotate_objects: ObjectRotation,
                                  rng: np.random.Generator) -> List[SpawnedObjectGoal]:
+    clear_sim_from_objects(sim)
     distrib = SpawnPositionDistribution(sim, height=start_pos[1])
     positions = distrib.sample_reachable_from_position(len(template_ids), start_pos, rng)
     goals = spawn_objects(sim, template_ids, positions, rotate_objects, rng)
     recompute_navmesh_with_static_objects(sim)
     try:
+        check_reachability(sim, goals, start_pos)
         goals = find_view_points(sim, goals, start_pos)
     except UnreachableGoalError as e:
         _debug_render(sim, distrib, goals, e)
         raise
-    finally:
-        clear_sim_from_objects(sim)
     return goals
 
 
