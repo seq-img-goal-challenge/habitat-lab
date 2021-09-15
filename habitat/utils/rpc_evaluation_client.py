@@ -1,8 +1,6 @@
 from typing import Optional, Dict, Union, Any
 import io
-import threading
 import time
-import xmlrpc.server
 import xmlrpc.client
 
 import numpy as np
@@ -13,7 +11,7 @@ from habitat.core.agent import Agent
 from habitat.core.benchmark import Benchmark
 
 
-DEFAULT_RPC_PORT = 8000
+from habitat.utils.rpc_evaluation_server import DEFAULT_RPC_PORT
 
 
 def _serialize_visual_observations(observations: Observations) -> bytes:
@@ -24,13 +22,8 @@ def _serialize_visual_observations(observations: Observations) -> bytes:
     return buf.getvalue()
 
 
-def _deserialize_visual_observations(buf: bytes) -> Dict[str, np.ndarray]:
-    buf = io.BytesIO(buf)
-    return {uuid: obs for uuid, obs in np.load(buf).items()}
-
-
 class AgentProxy(Agent):
-    def __init__(self, agent_url: str, num_retries: int=5, retry_delay: float=1.0) -> None:
+    def __init__(self, agent_url: str, num_retries: int=20, retry_delay: float=60.0) -> None:
         self.proxy = xmlrpc.client.ServerProxy(agent_url, use_builtin_types=True)
         last_error = None
         for _ in range(num_retries):
@@ -52,32 +45,6 @@ class AgentProxy(Agent):
 
     def terminate(self) -> None:
         self.proxy.terminate()
-
-
-def run_rpc_agent(agent: Agent, port: int=DEFAULT_RPC_PORT) -> None:
-    with xmlrpc.server.SimpleXMLRPCServer(("localhost", port),
-                                          logRequests=False,
-                                          allow_none=True,
-                                          use_builtin_types=True) as rpc_server:
-        @rpc_server.register_function
-        def check_init() -> bool:
-            return True
-
-        @rpc_server.register_function
-        def reset() -> None:
-            agent.reset()
-
-        @rpc_server.register_function
-        def act(serialized_obs: bytes) -> Union[int, str, Dict[str, Any]]:
-            obs = _deserialize_visual_observations(serialized_obs)
-            return agent.act(obs)
-
-        @rpc_server.register_function
-        def terminate() -> None:
-            t = threading.Thread(target=rpc_server.shutdown)
-            t.start()
-
-        rpc_server.serve_forever()
 
 
 def run_rpc_benchmark(config_paths: Optional[str]=None,
