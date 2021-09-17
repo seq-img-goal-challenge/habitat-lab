@@ -3,6 +3,7 @@ import argparse
 import enum
 import sys
 import os
+import time
 import glob
 import itertools
 import gzip
@@ -11,6 +12,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 import quaternion
 import magnum as mn
+import cv2
 import tqdm
 
 import habitat
@@ -29,43 +31,61 @@ from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
 
 
-_debug_cnt = 0
-def _debug_render(sim, distrib, goals, error):
-    import cv2
+class _DebugRenderer:
+    def __init__(self, outdir="out/spawned_objectnav_generator_debug/"):
+        self.outdir = outdir
+        os.makedirs(self.outdir, exist_ok=True)
 
-    def put_text(disp, txt, emph=False):
-        thick = 2 if emph else 1
-        (w, h), b = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 1, thick)
-        cv2.putText(disp, txt, (j - w // 2, i - b),
-                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), thick)
+    def render(self, sim, distrib, goals, error):
+        def put_text(disp, txt, emph=False):
+            thick = 2 if emph else 1
+            (w, h), b = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 1, thick)
+            cv2.putText(disp, txt, (j - w // 2, i - b),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), thick)
 
-    d = distrib.get_spatial_distribution()
-    m = distrib.get_nav_mask()
-    disp = cv2.applyColorMap((d * 255 / d.max()).astype(np.uint8), cv2.COLORMAP_JET)
-    disp[~m] = 0
-    new_m = sim.pathfinder.get_topdown_view(distrib.resolution, distrib.height)
-    disp[m & ~new_m] //= 2
-    i, j = distrib.world_to_map(error.start_pos)
-    cv2.circle(disp, (j, i), 5, (0, 255, 0), 2)
-    put_text(disp, "START", False)
-    for goal in goals:
-        cat = goal.object_template_id.split('/')[-2]
-        i, j = distrib.world_to_map(np.array(goal.position))
-        cv2.circle(disp, (j, i), 5, (0, 0, 255), 2)
-        put_text(disp, cat, goal is error.goal)
+        d = distrib.get_spatial_distribution()
+        m = distrib.get_nav_mask()
+        disp = cv2.applyColorMap((d * 255 / d.max()).astype(np.uint8), cv2.COLORMAP_JET)
+        disp[~m] = 0
+        new_m = sim.pathfinder.get_topdown_view(distrib.resolution, distrib.height)
+        disp[m & ~new_m] //= 2
+        i, j = distrib.world_to_map(error.start_pos)
+        cv2.circle(disp, (j, i), 5, (0, 255, 0), 2)
+        put_text(disp, "START", False)
+        for goal in goals:
+            cat = goal.object_template_id.split('/')[-2]
+            i, j = distrib.world_to_map(np.array(goal.position))
+            cv2.circle(disp, (j, i), 5, (0, 0, 255), 2)
 
-        t, l = distrib.world_to_map(goal.position + np.array(goal._bounding_box.min))
-        b, r = distrib.world_to_map(goal.position + np.array(goal._bounding_box.max))
-        cv2.rectangle(disp, (l, t), (r, b), (225, 0, 255))
+            rot = np.quaternion(goal.rotation[3], *goal.rotation[:3])
+            bb = np.array([[goal._bounding_box.back_bottom_left,
+                            goal._bounding_box.back_bottom_right,
+                            goal._bounding_box.front_bottom_right,
+                            goal._bounding_box.front_bottom_left],
+                           [goal._bounding_box.back_top_left,
+                            goal._bounding_box.back_top_right,
+                            goal._bounding_box.front_top_right,
+                            goal._bounding_box.front_top_left]])
+            bb = np.concatenate((np.zeros((2, 4, 1)), bb), -1)
+            bb = rot * quaternion.from_float_array(bb) * rot.conjugate()
+            bb = quaternion.as_float_array(bb)[..., 1:]
+            bb = distrib.world_to_map(goal.position + bb)[..., [1, 0]]
+            cv2.polylines(disp, bb, True, (255, 0, 255))
 
-        for view_pt in goal.view_points:
-            i, j = distrib.world_to_map(view_pt.position)
-            cv2.circle(disp, (j, i), 3, (0, 255, 255), 2)
+            for view_pt in goal.view_points:
+                i, j = distrib.world_to_map(view_pt.position)
+                cv2.circle(disp, (j, i), 3, (0, 255, 255), 2)
 
-    global _debug_cnt
-    outpath = f"TEMP/DEBUG_render_{_debug_cnt}.png"
-    _debug_cnt += 1
-    cv2.imwrite(outpath, disp)
+            put_text(disp, cat, goal is error.goal)
+
+        time_str = time.strftime("%Y-%m-%d_%H-%M-%S")
+        cnt = 0
+        outpath = os.path.join(self.outdir, f"DEBUG_render_{time_str}_{cnt}.png")
+        while os.path.exists(outpath):
+            cnt += 1
+            outpath = os.path.join(self.outdir, f"DEBUG_render_{time_str}_{cnt}.png")
+        cv2.imwrite(outpath, disp)
+_debug = _DebugRenderer()
 
 
 class ObjectPoolCategory:
@@ -295,7 +315,7 @@ def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
         check_reachability(sim, goals, start_pos)
         goals = find_view_points(sim, goals, start_pos)
     except UnreachableGoalError as e:
-        _debug_render(sim, distrib, goals, e)
+        _debug.render(sim, distrib, goals, e)
         raise
     return goals
 
