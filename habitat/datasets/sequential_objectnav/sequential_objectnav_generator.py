@@ -128,6 +128,7 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with gzip.open(out_path, 'wt') as f:
         f.write(dataset.to_json())
+    return dataset
 
 
 _DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/pointnav_gibson.yaml",
