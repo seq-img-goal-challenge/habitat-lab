@@ -37,6 +37,7 @@ class SpawnedObjectGoal(NavigationGoal):
     view_points: List[ViewPoint] = attr.ib(default=None, validator=not_none_validator)
     object_template_id: str
     _spawned_object_id: Optional[int] = attr.ib(init=False, default=None)
+    _bounding_box: Optional[mn.Range3D] = attr.ib(init=False, default=None)
 
     def __getstate__(self):
         return {k: v for k, v in vars(self).items() if not k.startswith('_')}
@@ -44,6 +45,7 @@ class SpawnedObjectGoal(NavigationGoal):
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._spawned_object_id = None
+        self._bounding_box = None
 
 
 @attr.s(auto_attribs=True, kw_only=True)
@@ -92,8 +94,9 @@ class SpawnedObjectNavTask(NavigationTask):
         for goal in episode.goals:
             mngr_id = self._loaded_object_templates[goal.object_template_id]
             goal._spawned_object_id = self._sim.add_object(mngr_id)
-            bb = self._sim.get_object_scene_node(goal._spawned_object_id).cumulative_bb
-            shift = np.array([0, bb.bottom, 0])
+            node = self._sim.get_object_scene_node(goal._spawned_object_id)
+            goal._bounding_box = node.cumulative_bb
+            shift = np.array([0, goal._bounding_box.bottom, 0])
             self._sim.set_translation(goal.position - shift, goal._spawned_object_id)
             self._sim.set_rotation(mn.Quaternion(goal.rotation[:3], goal.rotation[3]),
                                    goal._spawned_object_id)
@@ -113,7 +116,8 @@ class SpawnedObjectNavTask(NavigationTask):
         self._despawn_objects()
         self._reload_templates(episode)
         self._spawn_objects(episode)
-        self._recompute_navmesh_for_static_objects()
+        if self._config.ENABLE_OBJECT_COLLISIONS:
+            self._recompute_navmesh_for_static_objects()
         return super().reset(episode)
 
 
@@ -240,7 +244,7 @@ class DistanceToObject(Measure):
         return DistanceToGoal.cls_uuid
 
     def _get_targets_for_goal(self, goal: SpawnedObjectGoal):
-        bb = self._sim.get_object_scene_node(goal._spawned_object_id).cumulative_bb
+        bb = goal._bounding_box
         shifts = np.array([[x, 0, z] for x in (0, bb.left, bb.right)
                                      for z in (0, bb.back, bb.front)])
         targets = np.array(goal.position)[None, :] + shifts
