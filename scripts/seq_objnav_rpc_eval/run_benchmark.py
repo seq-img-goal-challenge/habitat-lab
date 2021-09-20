@@ -1,7 +1,7 @@
 import argparse
 import json
 
-from habitat.utils.local_rpc_evaluation import run_rpc_benchmark, DEFAULT_RPC_PORT
+from habitat.utils.rpc_evaluation_client import run_rpc_benchmark, DEFAULT_RPC_PORT
 
 
 def parse_args():
