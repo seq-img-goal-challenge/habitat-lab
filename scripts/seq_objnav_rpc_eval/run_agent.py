@@ -4,12 +4,12 @@ import numpy as np
 import gym
 
 from habitat.utils.rpc_evaluation_server import run_rpc_agent
-from SUBMISSION import SubmittedAgent
+from SUBMISSION.agent import SubmittedAgent
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", "-p", type=int, default=DEFAULT_RPC_PORT)
+    parser.add_argument("--port", "-p", type=int)
     return parser.parse_args()
 
 

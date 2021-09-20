@@ -1,7 +1,7 @@
 import argparse
 import json
 
-from habitat.utils.local_rpc_evaluation import run_rpc_benchmark, DEFAULT_RPC_PORT
+from habitat.utils.rpc_evaluation_client import run_rpc_benchmark, DEFAULT_RPC_PORT
 
 
 def parse_args():
@@ -15,8 +15,9 @@ def parse_args():
 
 
 def main(args):
+    print('[eval container] evaluation started...', flush=True)
     metrics = run_rpc_benchmark(args.config_path, args.num_episodes, args.port)
-    print("METRICS >>>", json.dumps(metrics))
+    print("[eval container] METRICS >>>", json.dumps(metrics), flush=True)
 
 
 if __name__ == "__main__":

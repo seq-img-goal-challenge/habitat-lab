@@ -1,3 +1,5 @@
+# SIG challenge habitat-environment docker image for evaluation
+
 FROM nvidia/cudagl:11.1-devel-ubuntu20.04
 
 RUN apt-get update && \
@@ -25,5 +27,5 @@ RUN cd habitat-lab && \
 
 ENV GLOG_minloglevel=2 MAGNUM_LOG="quiet"
 
-ENTRYPOINT ["python3", "/habitat-lab/scripts/seq_objnav_rpc_eval/run_benchmark.py"]
+ENTRYPOINT ["/bin/bash", "/habitat-lab/scripts/seq_objnav_rpc_eval/entry_point_eval.sh"]
 CMD []

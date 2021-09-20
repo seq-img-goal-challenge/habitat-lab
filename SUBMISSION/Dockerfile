@@ -1,3 +1,5 @@
+# SIG challenge agent docker image for submission
+
 FROM nvidia/cudagl:11.1.1-devel-ubuntu20.04
 
 RUN apt-get update && \
@@ -13,6 +15,7 @@ RUN python3 -m pip install --no-cache-dir numpy gym && \
 ADD ./SUBMISSION/agent.py /SUBMISSION/
 ADD ./habitat/utils/rpc_evaluation_server.py /habitat/utils/
 ADD ./scripts/seq_objnav_rpc_eval/run_agent.py /
+ADD ./scripts/seq_objnav_rpc_eval/entry_point_agent.sh /
 
-ENTRYPOINT ["python3", "run_agent.py"]
+ENTRYPOINT ["/bin/bash", "/entry_point_agent.sh"]
 CMD []
