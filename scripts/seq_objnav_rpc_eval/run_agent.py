@@ -9,7 +9,7 @@ from SUBMISSION.agent import SubmittedAgent
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--port", "-p", type=int, default=DEFAULT_RPC_PORT)
+    parser.add_argument("--port", "-p", type=int)
     return parser.parse_args()
 
 
