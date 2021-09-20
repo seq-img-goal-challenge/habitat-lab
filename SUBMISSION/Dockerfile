@@ -12,7 +12,7 @@ RUN python3 -m pip install --no-cache-dir numpy gym && \
                                           torchvision==0.10.0+cu111 \
                            -f https://download.pytorch.org/whl/torch_stable.html
 
-ADD ./SUBMISSION/agent.py /SUBMISSION/
+ADD ./SUBMISSION /SUBMISSION/
 ADD ./habitat/utils/rpc_evaluation_server.py /habitat/utils/
 ADD ./scripts/seq_objnav_rpc_eval/run_agent.py /
 ADD ./scripts/seq_objnav_rpc_eval/entry_point_agent.sh /

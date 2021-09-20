@@ -4,7 +4,7 @@ import numpy as np
 import gym
 
 from habitat.utils.rpc_evaluation_server import run_rpc_agent
-from SUBMISSION.agent import SubmittedAgent
+from SUBMISSION import SubmittedAgent
 
 
 def parse_args():
