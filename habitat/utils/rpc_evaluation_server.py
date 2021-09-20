@@ -37,4 +37,6 @@ def run_rpc_agent(agent: "habitat.Agent", port: int=DEFAULT_RPC_PORT) -> None:
             t = threading.Thread(target=rpc_server.shutdown)
             t.start()
 
+        print('agent server listening at', rpc_server.server_address, flush=True)
+        print('AGENTSRVPORT', rpc_server.server_address[1], flush=True)
         rpc_server.serve_forever()
