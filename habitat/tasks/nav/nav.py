@@ -73,6 +73,10 @@ class NavigationGoal:
     position: List[float] = attr.ib(default=None, validator=not_none_validator)
     radius: Optional[float] = None
 
+    @property
+    def pathfinder_targets(self) -> List[List[float]]:
+        return [self.position]
+
 
 @attr.s(auto_attribs=True, kw_only=True)
 class RoomGoal(NavigationGoal):

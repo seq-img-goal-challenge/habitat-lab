@@ -1,4 +1,4 @@
-from typing import Any, Optional, List, Dict
+from typing import Any, Optional, List, Dict, ClassVar
 
 import attr
 import numpy as np
@@ -48,35 +48,32 @@ class SequentialDataset(Dataset):
 
 @registry.register_task(name="SequentialNav-v0")
 class SequentialNavigationTask(NavigationTask):
-    success_dist: float
-
-    def __init__(self, *args: Any, config: Config, **kwargs: Any) -> None:
-        self.success_dist = config.SUCCESS_DISTANCE
+    def __init__(self, config: Config, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, config=config, **kwargs)
 
     def reset(self, episode: SequentialEpisode) -> Observations:
         episode._current_step_index = 0
         return super().reset(episode)
 
-    def _check_episode_is_active(self, *args: Any, episode: SequentialEpisode,
-                                 **kwargs: Any) -> bool:
+    def _check_episode_is_active(self, episode: SequentialEpisode,
+                                       *args: Any, **kwargs: Any) -> bool:
         return 0 <= episode._current_step_index < episode.num_steps
 
 
 @registry.register_task_action
 class FoundAction(SimulatorTaskAction):
-    name: str = "FOUND"
+    name: ClassVar[str] = "FOUND"
     _current_episode: Optional[SequentialEpisode] = None
 
     def reset(self, episode: SequentialEpisode, task: SequentialNavigationTask) -> None:
         self._current_episode = episode
 
-    def step(self, *args: Any, task: SequentialNavigationTask, **kwargs: Any) -> Observations:
+    def step(self, task: SequentialNavigationTask, *args: Any, **kwargs: Any) -> Observations:
         step = self._current_episode.steps[self._current_episode._current_step_index]
+        step_targets = sum((goal.pathfinder_targets for goal in step.goals), [])
         pos = self._sim.get_agent_state().position
-        d = self._sim.geodesic_distance(pos, [goal.position for goal in step.goals])
-        if d <= task.success_dist or any(goal.radius is not None and d <= goal.radius
-                                         for goal in step.goals):
+        d = self._sim.geodesic_distance(pos, step_targets)
+        if d <= task._config.SUCCESS_DISTANCE:
             self._current_episode._current_step_index += 1
         else:
             self._current_episode._current_step_index = -1
@@ -96,9 +93,9 @@ class SequentialTopDownMap(TopDownMap):
         values = []
         for step in episode.steps[episode._current_step_index:]:
             values.append(last)
-            last = [(g.position, *min((d + self._sim.geodesic_distance(pos, g.position), i)
-                                      for i, (pos, d, _) in enumerate(last)))
-                    for g in step.goals]
+            last = [(trg, *min((d + self._sim.geodesic_distance(pos, trg), i)
+                               for i, (pos, d, _) in enumerate(last)))
+                    for goal in step.goals for trg in goal.pathfinder_targets]
 
         pos, _, back = min(last, key=lambda tup: tup[1])
         path = []
@@ -135,12 +132,12 @@ class SequentialTopDownMap(TopDownMap):
 
 @registry.register_measure
 class DistanceToNextGoal(Measure):
-    cls_uuid: str = "distance_to_next_goal"
+    cls_uuid: ClassVar[str] = "distance_to_next_goal"
     _sim: Simulator
-    _last_step_idx: int
+    _last_step_index: int
     _last_pos: Optional[np.ndarray]
 
-    def __init__(self, *args: Any, sim: Simulator, **kwargs: Any) -> None:
+    def __init__(self, sim: Simulator, *args: Any, **kwargs: Any) -> None:
         self._sim = sim
         self._last_step_index = 0
         self._last_pos = None
@@ -151,16 +148,17 @@ class DistanceToNextGoal(Measure):
         return self.cls_uuid
 
     def _compute_distance(self, pos: np.ndarray, episode: SequentialEpisode) -> float:
-        idx = min(episode._current_step_index, episode.num_steps - 1)
-        step_goals = episode.steps[idx].goals
-        return self._sim.geodesic_distance(pos, [goal.position for goal in step_goals])
+        idx = np.clip(episode._current_step_index,
+                      self._last_step_index, episode.num_steps - 1)
+        step_targets = sum((goal.pathfinder_targets for goal in episode.steps[idx].goals), [])
+        return self._sim.geodesic_distance(pos, step_targets)
 
-    def reset_metric(self, *args: Any, episode: SequentialEpisode, **kwargs: Any) -> None:
+    def reset_metric(self, episode: SequentialEpisode, *args: Any, **kwargs: Any) -> None:
         self._last_step_index = episode._current_step_index
         self._last_pos = np.array(self._sim.get_agent_state().position)
         self._metric = self._compute_distance(self._last_pos, episode)
 
-    def update_metric(self, *args: Any, episode: SequentialEpisode, **kwargs: Any) -> None:
+    def update_metric(self, episode: SequentialEpisode, *args: Any, **kwargs: Any) -> None:
         pos = np.array(self._sim.get_agent_state().position)
         if self._last_step_index == episode._current_step_index \
                 and np.allclose(self._last_pos, pos):
@@ -172,27 +170,27 @@ class DistanceToNextGoal(Measure):
 
 @registry.register_measure
 class SequentialSuccess(Measure):
-    cls_uuid: str = "seq_success"
-    _radius: float
+    cls_uuid: ClassVar[str] = "seq_success"
+    _config: Config
 
-    def __init__(self, *args: Any, config: Config, **kwargs: Any) -> None:
+    def __init__(self, config: Config, *args: Any, **kwargs: Any) -> None:
+        self._config = config
         self._metric = 0.0
-        self._radius = config.SUCCESS_DISTANCE
         super().__init__(*args, config=config, **kwargs)
 
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
         return self.cls_uuid
 
-    def reset_metric(self, *args: Any, task: SequentialNavigationTask, **kwargs: Any) -> None:
+    def reset_metric(self, task: SequentialNavigationTask, *args: Any, **kwargs: Any) -> None:
         task.measurements.check_measure_dependencies(self.uuid, [DistanceToNextGoal.cls_uuid])
         self._metric = 0.0
 
-    def update_metric(self, *args: Any, episode: SequentialEpisode,
-                      task: SequentialNavigationTask, **kwargs: Any) -> None:
+    def update_metric(self, episode: SequentialEpisode, task: SequentialNavigationTask,
+                            *args: Any, **kwargs: Any) -> None:
         if episode._current_step_index < episode.num_steps:
             return
         d = task.measurements.measures[DistanceToNextGoal.cls_uuid].get_metric()
-        if d <= self._radius:
+        if d <= self._config.SUCCESS_DISTANCE:
             self._metric = 1.0
 
 
@@ -201,14 +199,14 @@ class SequentialSPL(Measure):
     _sim: Simulator
     _shortest_dist: float
     _cumul_dist: float
-    _last_step_idx: int
+    _last_step_index: int
     _last_pos: Optional[np.ndarray]
 
-    def __init__(self, *args: Any, sim: Simulator, **kwargs: Any) -> None:
+    def __init__(self, sim: Simulator, *args: Any, **kwargs: Any) -> None:
         self._sim = sim
         self._shortest_dist = np.inf
         self._cumul_dist = 0.0
-        self._last_step_idx = 0
+        self._last_step_index = 0
         self._last_pos = None
         self._metric = 0.0
         super().__init__(*args, sim=sim, **kwargs)
@@ -219,35 +217,36 @@ class SequentialSPL(Measure):
     def _compute_shortest_dist(self, episode: SequentialEpisode) -> float:
         last = [(episode.start_position, 0.0)]
         for step in episode.steps:
-            last = [(goal.position, min(d + self._sim.geodesic_distance(pos, goal.position)
-                                        for pos, d in last)) for goal in step.goals]
+            last = [(trg, min(d + self._sim.geodesic_distance(pos, trg)
+                              for pos, d in last))
+                    for goal in step.goals for trg in goal.pathfinder_targets]
         return min(d for _, d in last)
 
-    def reset_metric(self, *args: Any, episode: SequentialEpisode,
-                     task: SequentialNavigationTask, **kwargs: Any) -> None:
+    def reset_metric(self, episode: SequentialEpisode, task: SequentialNavigationTask,
+                           *args: Any, **kwargs: Any) -> None:
         task.measurements.check_measure_dependencies(self.uuid, [SequentialSuccess.cls_uuid])
         self._shortest_dist = self._compute_shortest_dist(episode)
         self._cumul_dist = 0.0
-        self._last_step_idx = 0
+        self._last_step_index = episode._current_step_index
         self._last_pos = np.array(self._sim.get_agent_state().position)
         self._metric = 0.0
 
-    def update_metric(self, *args: Any, episode: SequentialEpisode,
-                      task: SequentialNavigationTask, **kwargs: Any) -> None:
+    def update_metric(self, episode: SequentialEpisode, task: SequentialNavigationTask,
+                            *args: Any, **kwargs: Any) -> None:
         pos = np.array(self._sim.get_agent_state().position)
-        if self._last_step_idx == episode._current_step_index \
+        if self._last_step_index == episode._current_step_index \
                 and np.allclose(self._last_pos, pos):
                     return
         self._cumul_dist += np.linalg.norm(pos - self._last_pos)
         if task.measurements.measures[SequentialSuccess.cls_uuid].get_metric():
             self._metric = self._shortest_dist / max(self._shortest_dist, self._cumul_dist)
-        self._last_step_idx = episode._current_step_index
         self._last_pos = pos
+        self._last_step_index = episode._current_step_index
 
 
 @registry.register_measure
 class Progress(Measure):
-    cls_uuid: str = "progress"
+    cls_uuid: ClassVar[str] = "progress"
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._metric = 0.0
@@ -256,10 +255,10 @@ class Progress(Measure):
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
         return self.cls_uuid
 
-    def reset_metric(self, *args: Any, task: SequentialNavigationTask, **kwargs: Any) -> None:
+    def reset_metric(self, task: SequentialNavigationTask, *args: Any, **kwargs: Any) -> None:
         self._metric = 0.0
 
-    def update_metric(self, *args: Any, episode: SequentialEpisode, **kwargs: Any) -> None:
+    def update_metric(self, episode: SequentialEpisode, *args: Any, **kwargs: Any) -> None:
         if episode._current_step_index > 0:
             self._metric = episode._current_step_index / episode.num_steps
 
@@ -269,14 +268,14 @@ class PPL(Measure):
     _sim: Simulator
     _shortest_dist: List[float]
     _cumul_dist: float
-    _last_step_idx: int
+    _last_step_index: int
     _last_pos: Optional[np.ndarray]
 
-    def __init__(self, *args: Any, sim: Simulator, **kwargs: Any) -> None:
+    def __init__(self, sim: Simulator, *args: Any, **kwargs: Any) -> None:
         self._sim = sim
         self._shortest_dist = []
         self._cumul_dist = 0.0
-        self._last_step_idx = 0
+        self._last_step_index = 0
         self._last_pos = None
         self._metric = 0.0
         super().__init__(*args, sim=sim, **kwargs)
@@ -289,9 +288,9 @@ class PPL(Measure):
         values = []
         for step in episode.steps:
             values.append(last)
-            last = [(g.position, *min((d + self._sim.geodesic_distance(pos, g.position), i)
-                                      for i, (pos, d, _) in enumerate(last)))
-                    for g in step.goals]
+            last = [(trg, *min((d + self._sim.geodesic_distance(pos, trg), i)
+                               for i, (pos, d, _) in enumerate(last)))
+                    for goal in step.goals for trg in goal.pathfinder_targets]
         _, d, back = min(last, key=lambda tup: tup[1])
         distances = []
         while back is not None:
@@ -300,25 +299,25 @@ class PPL(Measure):
         distances.reverse()
         return distances
 
-    def reset_metric(self, *args: Any, episode: SequentialEpisode,
-                     task: SequentialNavigationTask, **kwargs: Any) -> None:
+    def reset_metric(self, episode: SequentialEpisode, task: SequentialNavigationTask,
+                           *args: Any, **kwargs: Any) -> None:
         task.measurements.check_measure_dependencies(self.uuid, [Progress.cls_uuid])
         self._shortest_dist = self._compute_shortest_dist(episode)
         self._cumul_dist = 0.0
-        self._last_step_idx = 0
+        self._last_step_index = 0
         self._last_pos = np.array(self._sim.get_agent_state().position)
         self._metric = 0.0
 
-    def update_metric(self, *args: Any, episode: SequentialEpisode,
-                      task: SequentialNavigationTask, **kwargs: Any) -> None:
+    def update_metric(self, episode: SequentialEpisode, task: SequentialNavigationTask,
+                            *args: Any, **kwargs: Any) -> None:
         pos = np.array(self._sim.get_agent_state().position)
-        k = episode._current_step_index
-        if self._last_step_idx == k and np.allclose(self._last_pos, pos):
+        idx = episode._current_step_index
+        if self._last_step_index == idx and np.allclose(self._last_pos, pos):
             return
         self._cumul_dist += np.linalg.norm(pos - self._last_pos)
-        if k > 0:
+        if idx > 0:
             p = task.measurements.measures[Progress.cls_uuid].get_metric()
-            d = self._shortest_dist[k - 1]
+            d = self._shortest_dist[idx - 1]
             self._metric = p * d / max(self._cumul_dist, d)
-        self._last_step_idx = k
+        self._last_step_index = idx
         self._last_pos = pos

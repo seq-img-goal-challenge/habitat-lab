@@ -98,6 +98,8 @@ def get_view_pt_rotations(rel_pos: np.ndarray) -> np.ndarray:
 
 def render_view_pts(sim: HabitatSim, abs_pos: np.ndarray, abs_rot: np.ndarray) \
                    -> Dict[str, np.ndarray]:
+    # Get a copy to restore agent state at the end (with camera tilt if actionspace='v1')
+    prv_s = sim.get_agent_state()
     s = sim.get_agent_state()
     observations = {uuid: [] for uuid in s.sensor_states}
     for pos, rot in zip(abs_pos, abs_rot):
@@ -108,6 +110,5 @@ def render_view_pts(sim: HabitatSim, abs_pos: np.ndarray, abs_rot: np.ndarray) \
         obs = sim.get_sensor_observations()
         for uuid in s.sensor_states:
             observations[uuid].append(obs[uuid])
-    s.sensor_states = {}
-    sim.get_agent(0).set_state(s)
+    sim.get_agent(0).set_state(prv_s, False, False)
     return {uuid: np.stack(obs, 0) for uuid, obs in observations.items()}

@@ -47,6 +47,19 @@ class SpawnedObjectGoal(NavigationGoal):
         self._spawned_object_id = None
         self._bounding_box = None
 
+    @property
+    def pathfinder_targets(self) -> List[List[float]]:
+        x, y, z = self.position
+        return [[x + dx, y + dy, z + dz]
+                for dx, dy, dz in (self._bounding_box.back_bottom_left,
+                                   self._bounding_box.back_bottom_right,
+                                   self._bounding_box.back_top_left,
+                                   self._bounding_box.back_top_right,
+                                   self._bounding_box.front_bottom_left,
+                                   self._bounding_box.front_bottom_right,
+                                   self._bounding_box.front_top_left,
+                                   self._bounding_box.front_top_right)]
+
 
 @attr.s(auto_attribs=True, kw_only=True)
 class SpawnedObjectNavEpisode(Episode):
@@ -243,24 +256,16 @@ class DistanceToObject(Measure):
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
         return DistanceToGoal.cls_uuid
 
-    def _get_targets_for_goal(self, goal: SpawnedObjectGoal):
-        bb = goal._bounding_box
-        shifts = np.array([[x, 0, z] for x in (0, bb.left, bb.right)
-                                     for z in (0, bb.back, bb.front)])
-        targets = np.array(goal.position)[None, :] + shifts
-        return targets.tolist()
-
     def reset_metric(self, episode: SpawnedObjectNavEpisode,
                      *args: Any, **kwargs: Any) -> None:
-        self._ep_targets = []
-        for goal in episode.goals:
-            self._ep_targets.extend(self._get_targets_for_goal(goal))
+        self._ep_targets = sum((goal.pathfinder_targets for goal in episode.goals), [])
         self._last_pos = self._sim.get_agent_state().position
         self._metric = self._sim.geodesic_distance(self._last_pos, self._ep_targets)
 
     def update_metric(self, episode: SpawnedObjectNavEpisode,
                       *args: Any, **kwargs: Any) -> None:
         pos = self._sim.get_agent_state().position
-        if not np.allclose(pos, self._last_pos):
-            self._metric = self._sim.geodesic_distance(pos, self._ep_targets)
-            self._last_pos = pos
+        if np.allclose(pos, self._last_pos):
+            return
+        self._metric = self._sim.geodesic_distance(pos, self._ep_targets)
+        self._last_pos = pos
