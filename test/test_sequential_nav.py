@@ -282,6 +282,55 @@ def test_sequential_online_pointgoal():
             assert np.isclose(np.linalg.norm(vec), r)
             assert np.isclose(np.arctan2(-vec[0], -vec[2]), phi)
 
+    cfg.defrost()
+    cfg.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.SEQUENTIAL_MODE = "SUFFIX"
+    cfg.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(46123)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
+        while episode._current_step_index == 0:
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            a = follower.get_next_action(goal_pos)
+            obs = task.step({"action": a}, episode)
+        assert obs["pointgoal_with_gps_compass"].shape == (episode.num_steps, 2)
+        s = sim.get_agent_state()
+        for (r, phi), step in zip(obs["pointgoal_with_gps_compass"], episode.steps[1:]):
+            vec = step.goals[0].position - s.position
+            vec = (s.rotation.inverse() * np.quaternion(0, *vec) * s.rotation).vec
+            assert np.isclose(np.linalg.norm(vec), r)
+            assert np.isclose(np.arctan2(-vec[0], -vec[2]), phi)
+        assert np.all(obs["pointgoal_with_gps_compass"][-1] \
+                      == cfg.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.PADDING_VALUE)
+
+    cfg.defrost()
+    cfg.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.SEQUENTIAL_MODE = "MYOPIC"
+    cfg.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(4563)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        task.reset(episode)
+        while episode._current_step_index == 0:
+            goal_pos = np.array(episode.steps[episode._current_step_index].goals[0].position)
+            a = follower.get_next_action(goal_pos)
+            obs = task.step({"action": a}, episode)
+        assert obs["pointgoal_with_gps_compass"].shape == (2,)
+        s = sim.get_agent_state()
+        r, phi = obs["pointgoal_with_gps_compass"]
+        step = episode.steps[1]
+        vec = step.goals[0].position - s.position
+        vec = (s.rotation.inverse() * np.quaternion(0, *vec) * s.rotation).vec
+        assert np.isclose(np.linalg.norm(vec), r)
+        assert np.isclose(np.arctan2(-vec[0], -vec[2]), phi)
+
 
 def test_sequential_top_down_map():
     from habitat.core.registry import registry
