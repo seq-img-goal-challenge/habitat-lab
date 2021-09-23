@@ -58,8 +58,9 @@ _C.EVAL.DETERMINISTIC = False
 _C.RL = CN()
 _C.RL.REWARD_MEASURE = "distance_to_goal"
 _C.RL.SUCCESS_MEASURE = "success"
-_C.RL.SEQUENTIAL_REWARD_MEASURE = "ppl"
-_C.RL.SUCCESS_REWARD = 2.5
+_C.RL.PROGRESS_MEASURE = "ppl"
+_C.RL.SUCCESS_REWARD = 3.0
+_C.RL.PROGRESS_REWARD = 3.0
 _C.RL.SLACK_REWARD = -0.01
 # -----------------------------------------------------------------------------
 # POLICY CONFIG
