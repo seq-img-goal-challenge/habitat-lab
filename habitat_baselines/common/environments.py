@@ -137,13 +137,13 @@ class NavRLEnv(habitat.RLEnv):
 
 @baseline_registry.register_env(name="SequentialNavRLEnv")
 class SequentialNavRLEnv(NavRLEnv):
-    _seq_reward_measure_name: str
+    _progress_measure_name: str
     _prv_seq_measure: Any
     _slack_r: float
     _success_r: float
 
     def __init__(self, config: Config, dataset: Optional[Dataset]=None) -> None:
-        self._seq_reward_measure_name = config.RL.SEQUENTIAL_REWARD_MEASURE
+        self._progress_measure_name = config.RL.PROGRESS_MEASURE
         self._prv_seq_measure = None
         self._slack_r = config.RL.SLACK_REWARD
         self._success_r = config.RL.SUCCESS_REWARD
@@ -151,7 +151,7 @@ class SequentialNavRLEnv(NavRLEnv):
 
     def reset(self):
         observations = super().reset()
-        self._prv_seq_measure = self._env.get_metrics()[self._seq_reward_measure_name]
+        self._prv_seq_measure = self._env.get_metrics()[self._progress_measure_name]
         return observations
 
     def get_reward_range(self) -> Tuple[float, float]:
@@ -165,7 +165,7 @@ class SequentialNavRLEnv(NavRLEnv):
         m = self._env.get_metrics()
 
         cur_measure = m[self._reward_measure_name]
-        cur_seq_measure = m[self._seq_reward_measure_name]
+        cur_seq_measure = m[self._progress_measure_name]
 
         progress_delta = cur_seq_measure - self._prv_seq_measure
         if progress_delta > 0: # Progress can only increase
