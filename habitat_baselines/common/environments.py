@@ -169,7 +169,7 @@ class SequentialNavRLEnv(NavRLEnv):
 
         progress_delta = cur_seq_measure - self._prv_seq_measure
         if progress_delta > 0: # Progress can only increase
-            reward += progress_delta
+            reward += self._rl_config.PROGRESS_REWARD
             self._prv_seq_measure = cur_seq_measure
             # Reset reward measure if some progress was made
             # (otherwise would penalize going to next step...)
