@@ -160,33 +160,44 @@ class SpawnedObjectGoalCategorySensor(Sensor):
 @registry.register_sensor
 class SpawnedObjectGoalAppearanceSensor(Sensor):
     _sim: Simulator
-    _sensor_uuid: "str"
+    _sim_sensor: Sensor
     _oob_pos: np.ndarray
-    _cache_ep_id: Optional[str]
-    _appearance_cache: Optional[np.ndarray]
+    _cached_ep_id: Optional[str]
+    _cached_appearance: Optional[np.ndarray]
 
-    #TODO (gbono): Make appearance RGB-D? (currently RGB only, like imagegoal)
     def __init__(self, config: Config, sim: Simulator, *args, **kwargs) -> None:
         self._sim = sim
-        self._sensor_uuid = next((uuid for uuid, sensor in sim.sensor_suite.sensors.items()
-                                  if sensor.sensor_type == SensorTypes.COLOR), None)
-        if self._sensor_uuid is None:
-            raise RuntimeError("Could not find a sensor of type 'COLOR'" \
-                               + "in the simulator sensor suite")
+        if config.SENSOR_UUID is None:
+            try:
+                sensor_type = SensorTypes[config.SENSOR_TYPE]
+            except KeyError as e:
+                raise RuntimeError(f"Invalid sensor type {config.SENSOR_TYPE}.") from e
+            try:
+                self._sim_sensor = next((sensor for sensor in sim.sensor_suite.sensors.values()
+                                         if sensor.sensor_type == sensor_type))
+            except StopIteration as e:
+                raise RuntimeError(f"Could not find a sensor of type {config.SENSOR_TYPE} "
+                                   + "in simulator sensor suite.") from e
+        else:
+            try:
+                self._sim_sensor = sim.sensor_suite.sensors[config.SENSOR_UUID]
+            except KeyError as e:
+                raise RuntimeError(f"Could not find sensor {config.SENSOR_UUID} "
+                                   + "in simulator sensor suite.") from e
         max_y = sim.pathfinder.get_bounds()[1][1]
-        self._oob_pos = np.array([0.0, max_y + 50.0, 0.0])
-        self._cache_ep_id = None
-        self._appearance_cache = None
+        self._oob_pos = np.array([0.0, 2 * max_y, 0.0])
+        self._cached_ep_id = None
+        self._cached_appearance = None
         super().__init__(config=config, *args, **kwargs)
 
     def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
         return "objectgoal_appearance"
 
     def _get_sensor_type(self, *args: Any, **kwargs: Any) -> SensorTypes:
-        return SensorTypes.COLOR
+        return self._sim_sensor.sensor_type
 
     def _get_observation_space(self, *args: Any, **kwargs: Any) -> Space:
-        src_space = self._sim.sensor_suite.observation_spaces.spaces[self._sensor_uuid]
+        src_space = self._sim_sensor.observation_space
         extended_shape = (self.config.NUM_VIEWS,) + src_space.shape
         return spaces.Box(low=np.broadcast_to(src_space.low, extended_shape),
                           high=np.broadcast_to(src_space.high, extended_shape),
@@ -213,11 +224,9 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
     def _render_views_around_goal(self, goal: SpawnedObjectGoal, num_views: int) -> None:
         if self.config.OUT_OF_CONTEXT:
             self._move_object_out_of_context(goal)
-
             rel_positions = get_random_view_pt_positions(num_views)
             rotations = get_view_pt_rotations(rel_positions)
             views = render_view_pts(self._sim, self._oob_pos + rel_positions, rotations)
-
             self._restore_object_in_context(goal)
         else:
             view_points = np.random.choice(goal.view_points, num_views, True)
@@ -225,19 +234,19 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
             rotations = np.array([view_pt.rotation for view_pt in view_points])
             rotations = quaternion.from_float_array(rotations[:, [3, 0, 1, 2]])
             views = render_view_pts(self._sim, positions, rotations)
-        return views['rgb'][..., :3]
+        return views[self._sim_sensor.uuid]
 
     def get_observation(self, episode: SpawnedObjectNavEpisode,
                         *args, **kwargs) -> VisualObservation:
-        if self._cache_ep_id is None or self._cache_ep_id != episode.episode_id:
+        if self._cached_ep_id is None or self._cached_ep_id != episode.episode_id:
             views = []
             num_views_per_goal, more_views = divmod(self.config.NUM_VIEWS, len(episode.goals))
             for k, goal in enumerate(episode.goals):
                 num_views = num_views_per_goal + (1 if k < more_views else 0)
                 views.append(self._render_views_around_goal(goal, num_views))
-            self._cache_ep_id = episode.episode_id
-            self._appearance_cache = np.concatenate(views, 0)
-        return self._appearance_cache
+            self._cached_ep_id = episode.episode_id
+            self._cached_appearance = np.concatenate(views, 0)
+        return self._cached_appearance
 
 
 @registry.register_measure

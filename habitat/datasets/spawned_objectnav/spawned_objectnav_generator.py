@@ -280,7 +280,7 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
         sim.set_translation(goal.position, goal._spawned_object_id)
         sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
 
-        diff = (depth_with != depth_without)
+        diff = (depth_with[..., 0] != depth_without[..., 0])
 
         diff_roi = diff[:, roi_vert, roi_horz]
         scores = diff_roi.sum(axis=(1, 2)) / diff_roi[0].size
