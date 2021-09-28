@@ -252,6 +252,26 @@ _C.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.TYPE = "SequentialOnlinePointGoalSens
 _C.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.PADDING_VALUE = 0.0
 _C.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR.SEQUENTIAL_MODE = "FULL"
 # -----------------------------------------------------------------------------
+# SEQUENTIAL MAP SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.SEQUENTIAL_MAP_SENSOR = CN()
+_C.TASK.SEQUENTIAL_MAP_SENSOR.TYPE = "SequentialMapSensor"
+_C.TASK.SEQUENTIAL_MAP_SENSOR.RESOLUTION = 1024
+_C.TASK.SEQUENTIAL_MAP_SENSOR.MARKER_SIZE = 10
+_C.TASK.SEQUENTIAL_MAP_SENSOR.FOG_OF_WAR = True
+_C.TASK.SEQUENTIAL_MAP_SENSOR.HFOV = 56
+_C.TASK.SEQUENTIAL_MAP_SENSOR.VISIBILITY = 2.0
+# -----------------------------------------------------------------------------
+# SEQUENTIAL EGO MAP SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.SEQUENTIAL_EGO_MAP_SENSOR = CN()
+_C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.TYPE = "SequentialEgoMapSensor"
+_C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.METERS_PER_PIXEL = 0.02
+_C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.MARKER_SIZE = 10
+_C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.FOG_OF_WAR = True
+_C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.HFOV = 56
+_C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.VISIBILITY = 2.0
+# -----------------------------------------------------------------------------
 # SEQUENTIAL TOP DOWN MAP MEASUREMENT
 # -----------------------------------------------------------------------------
 _C.TASK.SEQUENTIAL_TOP_DOWN_MAP = _C.TASK.TOP_DOWN_MAP.clone()

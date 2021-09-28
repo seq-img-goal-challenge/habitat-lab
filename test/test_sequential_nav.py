@@ -4,22 +4,27 @@ import numpy as np
 
 def test_registration():
     from habitat.core.registry import registry
-    from habitat.tasks.sequential_nav.sequential_nav import SequentialNavigationTask, \
-                                                            FoundAction, \
-                                                            SequentialPointGoalSensor, \
-                                                            SequentialOnlinePointGoalSensor, \
-                                                            SequentialTopDownMap, \
-                                                            DistanceToNextGoal, \
-                                                            SequentialSuccess, \
-                                                            SequentialSPL, \
-                                                            Progress, \
-                                                            PPL
+    from habitat.tasks.sequential_nav.sequential_nav import (SequentialNavigationTask,
+                                                             FoundAction,
+                                                             SequentialPointGoalSensor,
+                                                             SequentialOnlinePointGoalSensor,
+                                                             SequentialMapSensor,
+                                                             SequentialEgoMapSensor,
+                                                             SequentialOnlinePointGoalSensor,
+                                                             SequentialTopDownMap,
+                                                             DistanceToNextGoal,
+                                                             SequentialSuccess,
+                                                             SequentialSPL,
+                                                             Progress,
+                                                             PPL)
 
     assert registry.get_task("SequentialNav-v0") is SequentialNavigationTask
     assert registry.get_task_action("FoundAction") is FoundAction
     assert registry.get_sensor("SequentialPointGoalSensor") is SequentialPointGoalSensor
     assert registry.get_sensor("SequentialOnlinePointGoalSensor") \
             is SequentialOnlinePointGoalSensor
+    assert registry.get_sensor("SequentialMapSensor") is SequentialMapSensor
+    assert registry.get_sensor("SequentialEgoMapSensor") is SequentialEgoMapSensor
     assert registry.get_measure("SequentialTopDownMap") is SequentialTopDownMap
     assert registry.get_measure("DistanceToNextGoal") is DistanceToNextGoal
     assert registry.get_measure("SequentialSuccess") is SequentialSuccess
@@ -50,6 +55,12 @@ def test_default_config():
                for key in cfg.TASK.POINTGOAL_WITH_GPS_COMPASS_SENSOR)
     assert "SEQUENTIAL_MODE" in cfg.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR
     assert "PADDING_VALUE" in cfg.TASK.SEQUENTIAL_ONLINE_POINTGOAL_SENSOR
+
+    assert "SEQUENTIAL_MAP_SENSOR" in cfg.TASK
+    assert cfg.TASK.SEQUENTIAL_MAP_SENSOR.TYPE == "SequentialMapSensor"
+
+    assert "SEQUENTIAL_EGO_MAP_SENSOR" in cfg.TASK
+    assert cfg.TASK.SEQUENTIAL_EGO_MAP_SENSOR.TYPE == "SequentialEgoMapSensor"
 
     assert "SEQUENTIAL_TOP_DOWN_MAP" in cfg.TASK
     assert cfg.TASK.SEQUENTIAL_TOP_DOWN_MAP.TYPE == "SequentialTopDownMap"
@@ -246,7 +257,6 @@ def test_sequential_pointgoal():
 def test_sequential_online_pointgoal():
     import quaternion
 
-    from habitat.core.registry import registry
     from habitat.config.default import get_config
     from habitat.sims import make_sim
     from habitat.tasks import make_task
@@ -332,13 +342,88 @@ def test_sequential_online_pointgoal():
         assert np.isclose(np.arctan2(-vec[0], -vec[2]), phi)
 
 
-def test_sequential_top_down_map():
-    from habitat.core.registry import registry
+def test_map_sensor():
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
+    from habitat.utils.visualizations.maps import (MAP_TARGET_POINT_INDICATOR,
+                                                   MAP_SOURCE_POINT_INDICATOR)
+    cfg = get_config()
+    cfg.TASK.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.SENSORS = ["SEQUENTIAL_MAP_SENSOR"]
+    cfg.TASK.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(456123)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        obs = task.reset(episode)
+        assert "map" in obs
+        topdown_map = obs["map"]
+        assert isinstance(topdown_map, np.ndarray)
+        assert topdown_map.dtype == np.uint8
+        res = cfg.TASK.SEQUENTIAL_MAP_SENSOR.RESOLUTION
+        assert topdown_map.shape == (res, res)
+        for a in (1, 2, 3, 1, 1):
+            obs = task.step({"action": a}, episode)
+            topdown_map = obs["map"]
+            #TODO(gbono) check target and source (ie agent) indicator
+
+
+def test_ego_map_sensor():
+    import quaternion
     from habitat.config.default import get_config
     from habitat.sims import make_sim
     from habitat.tasks import make_task
     from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
     from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
+    from habitat.utils.visualizations.maps import (MAP_INVALID_POINT,
+                                                   MAP_TARGET_POINT_INDICATOR,
+                                                   MAP_SOURCE_POINT_INDICATOR)
+    cfg = get_config()
+    cfg.TASK.defrost()
+    cfg.TASK.TYPE = "SequentialNav-v0"
+    cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
+    cfg.TASK.SENSORS = ["SEQUENTIAL_EGO_MAP_SENSOR"]
+    cfg.TASK.freeze()
+    with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
+        sim.seed(456123)
+        episode = _make_test_episode(sim)
+        dataset = SequentialDataset()
+        dataset.episodes = [episode]
+        task = make_task(cfg.TASK.TYPE, config=cfg.TASK, sim=sim, dataset=dataset)
+        follower = ShortestPathFollower(sim, cfg.TASK.SUCCESS_DISTANCE, False, False)
+        obs = task.reset(episode)
+        assert "ego_map" in obs
+        ego_map = obs["ego_map"]
+        assert isinstance(ego_map, np.ndarray)
+        assert ego_map.dtype == np.uint8
+        mppx = cfg.TASK.SEQUENTIAL_EGO_MAP_SENSOR.METERS_PER_PIXEL
+        res = int(2 * cfg.TASK.SEQUENTIAL_EGO_MAP_SENSOR.VISIBILITY / mppx)
+        while task.is_episode_active:
+            goal_pos = episode.steps[episode._current_step_index].goals[0].position
+            a = follower.get_next_action(goal_pos)
+            obs = task.step({"action": a}, episode)
+            ego_map = obs["ego_map"]
+            assert ego_map.shape == (res, res)
+            s = sim.get_agent_state()
+            for step in episode.steps:
+                rel_pos = step.goals[0].position - s.position
+                rel_pos = (s.rotation.conj() * np.quaternion(0, *rel_pos) * s.rotation).vec
+                j, _, i = (rel_pos / mppx).astype(np.int64) + res // 2
+                if 0 <= i < res and 0 <= j < res:
+                    assert ego_map[i, j] in (MAP_INVALID_POINT, MAP_TARGET_POINT_INDICATOR)
+
+
+def test_sequential_top_down_map():
+    from habitat.config.default import get_config
+    from habitat.sims import make_sim
+    from habitat.tasks import make_task
+    from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
     from habitat.utils.visualizations.maps import to_grid, MAP_TARGET_POINT_INDICATOR
 
     cfg = get_config()
@@ -385,7 +470,6 @@ def test_sequential_top_down_map():
 
 
 def test_distance_to_next_goal():
-    from habitat.core.registry import registry
     from habitat.config.default import get_config
     from habitat.sims import make_sim
     from habitat.tasks import make_task
@@ -421,7 +505,6 @@ def test_distance_to_next_goal():
 
 
 def test_success():
-    from habitat.core.registry import registry
     from habitat.config.default import get_config
     from habitat.sims import make_sim
     from habitat.tasks import make_task
@@ -457,7 +540,6 @@ def test_success():
 
 
 def test_spl():
-    from habitat.core.registry import registry
     from habitat.config.default import get_config
     from habitat.sims import make_sim
     from habitat.tasks import make_task
@@ -493,7 +575,6 @@ def test_spl():
 
 
 def test_progress():
-    from habitat.core.registry import registry
     from habitat.config.default import get_config
     from habitat.sims import make_sim
     from habitat.tasks import make_task
@@ -529,7 +610,6 @@ def test_progress():
 
 
 def test_ppl():
-    from habitat.core.registry import registry
     from habitat.config.default import get_config
     from habitat.sims import make_sim
     from habitat.tasks import make_task
