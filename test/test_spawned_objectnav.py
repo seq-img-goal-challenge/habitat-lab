@@ -581,7 +581,8 @@ def test_generate_dataset():
     if not os.path.isdir(OBJECTS_DIR):
         pytest.skip(f"Test objects '{OBJECTS_DIR}' not available.")
 
-    generate_spawned_objectnav_dataset(CFG_PATH, [], SCENES_DIR, OBJECTS_DIR, 
+    cfg = habitat.get_config(CFG_PATH)
+    generate_spawned_objectnav_dataset(cfg, SCENES_DIR, OBJECTS_DIR, 
                                        NUM_EPISODES, MAX_GOALS, ObjectRotation.FIXED,
                                        ExistBehavior.OVERRIDE, NUM_RETRIES, SEED)
     data_cfg = habitat.get_config(CFG_PATH).DATASET
