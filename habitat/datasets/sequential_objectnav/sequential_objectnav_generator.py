@@ -1,21 +1,30 @@
 from typing import List, Dict, Set, Optional, Any
 import argparse
-import itertools
-import sys
 import os
 import gzip
+import itertools
+import logging
 
 import numpy as np
 import tqdm
 
 import habitat
+from habitat.config.default import Config
 from habitat.core.simulator import Simulator
 from habitat.datasets.spawned_objectnav.spawned_objectnav_generator \
         import ObjectPoolCategory, ObjectRotation, ExistBehavior, \
                UnreachableGoalError, MaxRetriesError, \
                create_object_pool, create_scene_pool, generate_spawned_objectgoals
+from habitat.datasets.sequential_objectnav.sequential_objectnav_dataset \
+        import SequentialObjectNavDatasetV0
 from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNavStep, \
                                                               SequentialObjectNavEpisode
+
+
+_logger = habitat.logger.getChild(os.path.basename(__file__))
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("[{asctime}] {levelname} ({name}): {msg}", style='{'))
+_logger.addHandler(_handler)
 
 
 def generate_sequential_objectnav_episode(sim: Simulator,
@@ -72,28 +81,26 @@ def generate_sequential_objectnav_episode(sim: Simulator,
                                       steps=steps)
 
 
-def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[str],
-                                          scenes_dir: str, objects_dir: str,
-                                          num_episodes:int,
-                                          min_seq_len: int, max_seq_len: int, max_goals: int,
-                                          rotate_objects: ObjectRotation,
-                                          if_exist: ExistBehavior,
-                                          num_retries: int,
-                                          seed: Optional[int]=None,
-                                          no_progress=False) -> None:
-    cfg = habitat.get_config(config_path, extra_config)
+def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir: str,
+                                          num_episodes:int, min_seq_len: int, max_seq_len: int,
+                                          max_goals: int, rotate_objects: ObjectRotation,
+                                          if_exist: ExistBehavior, num_retries: int,
+                                          seed: Optional[int]=None, verbose: int=0,
+                                          **kwargs) -> SequentialObjectNavDatasetV0:
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
 
     try:
         dataset = habitat.make_dataset(cfg.DATASET.TYPE, config=cfg.DATASET)
         if if_exist is ExistBehavior.ABORT:
-            print("'{}' already exists, aborting".format(out_path))
-            sys.exit(1)
+            _logger.error(f"'{out_path}' already exists, aborting")
+            return
         elif if_exist is ExistBehavior.OVERRIDE:
+            _logger.warning(f"Overriding '{out_path}'.")
             dataset.episodes = []
         elif if_exist is ExistBehavior.APPEND:
-            pass
+            _logger.info(f"Appending episodes to '{out_path}'.")
     except FileNotFoundError:
+        _logger.info(f"Creating new dataset '{out_path}'.")
         dataset = habitat.make_dataset(cfg.DATASET.TYPE)
     new_episodes = []
     ep_id = (str(i) for i in itertools.count())
@@ -103,7 +110,7 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
     object_pool = create_object_pool(objects_dir)
 
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
-    with tqdm.tqdm(total=num_episodes, disable=no_progress) as progress:
+    with tqdm.tqdm(total=num_episodes, disable=(verbose != 1)) as progress:
         for k, scene in enumerate(scene_pool):
             if num_ep_per_scene == 0 and k >= more_ep:
                 break
@@ -115,8 +122,10 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
                     sim.seed(seed + k)
                 for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                     try:
-                        episode = generate_sequential_objectnav_episode(sim, next(ep_id),
-                                                                        min_seq_len, max_seq_len,
+                        episode = generate_sequential_objectnav_episode(sim,
+                                                                        next(ep_id),
+                                                                        min_seq_len,
+                                                                        max_seq_len,
                                                                         max_goals,
                                                                         object_pool,
                                                                         rotate_objects,
@@ -124,7 +133,7 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
                                                                         rng)
                         new_episodes.append(episode)
                     except MaxRetriesError as e:
-                        print(e)
+                        _logger.error(e)
                     progress.update()
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -137,13 +146,14 @@ _DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/pointnav_gibson.y
                                  "scenes_dir": "data/scene_datasets/gibson",
                                  "objects_dir": "data/object_datasets/test_objects",
                                  "num_episodes": 25,
-                                 "min_seq_len": 1,
-                                 "max_seq_len": 1,
+                                 "min_seq_len": 3,
+                                 "max_seq_len": 3,
                                  "max_goals": 1,
-                                 "rotate_objects": ObjectRotation.FIXED,
+                                 "rotate_objects": ObjectRotation.VERTICAL,
                                  "if_exist": ExistBehavior.ABORT,
                                  "num_retries": 4,
-                                 "seed": None}
+                                 "seed": None,
+                                 "verbose": 0}
 
 
 def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
@@ -161,13 +171,21 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
                         choices=list(ExistBehavior))
     parser.add_argument("--num-retries", "-r", type=int)
     parser.add_argument("--seed", "-s", type=int)
-    parser.add_argument("--no-progress", action="store_true")
+    parser.add_argument("--verbose", "-v", action="count")
     parser.add_argument("extra_config", nargs=argparse.REMAINDER)
     parser.set_defaults(**_DEFAULT_ARGS)
     return parser.parse_args(argv)
 
 
 if __name__ == "__main__":
-    import logging
-    habitat.logger.setLevel(logging.ERROR)
-    generate_sequential_objectnav_dataset(**vars(_parse_args()))
+    args = _parse_args()
+    if args.verbose == 0:
+        habitat.logger.setLevel(logging.ERROR)
+    elif args.verbose == 1:
+        habitat.logger.setLevel(logging.WARN)
+    elif args.verbose == 2:
+        habitat.logger.setLevel(logging.INFO)
+    elif args.verbose == 3:
+        habitat.logger.setLevel(logging.DEBUG)
+    cfg = habitat.get_config(args.config_path, args.extra_config)
+    generate_sequential_objectnav_dataset(cfg, **vars(args))

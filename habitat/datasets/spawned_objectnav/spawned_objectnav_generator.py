@@ -1,21 +1,22 @@
 from typing import Any, Optional, Tuple, List, Dict, Iterator
 import argparse
-import enum
-import sys
 import os
-import time
 import glob
-import itertools
 import gzip
+import time
+import logging
+import enum
+import itertools
+import random
 
 import numpy as np
-from scipy.ndimage import gaussian_filter
 import quaternion
 import magnum as mn
 import cv2
 import tqdm
 
 import habitat
+from habitat.config.default import Config
 from habitat.core.simulator import Simulator
 from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, ViewPoint, \
                                                 SpawnedObjectNavEpisode
@@ -29,6 +30,12 @@ from habitat.datasets.spawned_objectnav.utils import DEFAULT_SCENE_PATH_EXT, \
                                                      render_view_pts
 from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
+
+
+_logger = habitat.logger.getChild(os.path.basename(__file__))
+_handler = logging.StreamHandler()
+_handler.setFormatter(logging.Formatter("[{asctime}] {levelname} ({name}): {msg}", style='{'))
+_logger.addHandler(_handler)
 
 
 class _DebugRenderer:
@@ -159,16 +166,20 @@ class MaxRetriesError(Exception):
 
 
 def create_object_pool(objects_dir: str) -> List[ObjectPoolCategory]:
-    return sorted(ObjectPoolCategory(
+    pool = sorted(ObjectPoolCategory(
         dir_entry.name, i,
         sorted(entry.path for entry in os.scandir(dir_entry.path)
                if entry.is_file() and entry.name.endswith(DEFAULT_OBJECT_PATH_EXT))
     ) for i, dir_entry in enumerate(os.scandir(objects_dir)) if dir_entry.is_dir())
+    _logger.info(f"Created pool of {len(pool)} object categories.")
+    return pool
 
 
 def create_scene_pool(scenes_dir: str) -> List[str]:
-    return sorted(glob.glob(os.path.join(scenes_dir, "**", f"*{DEFAULT_SCENE_PATH_EXT}"),
+    pool = sorted(glob.glob(os.path.join(scenes_dir, "**", f"*{DEFAULT_SCENE_PATH_EXT}"),
                             recursive=True))
+    _logger.info(f"Created pool of {len(pool)} scenes.")
+    return pool
 
 
 def spawn_objects(sim: Simulator,
@@ -214,6 +225,8 @@ def spawn_objects(sim: Simulator,
         goal._bounding_box = obj_node.cumulative_bb
         goals.append(goal)
 
+    _logger.info(f"Spawned {num_objects} objects "
+                 + "with {rotate_objects.name.lower()} rotations in simulator.")
     return goals
 
 
@@ -225,17 +238,17 @@ def recompute_navmesh_with_static_objects(sim):
     settings.agent_radius = ag_cfg.RADIUS
     settings.agent_height = ag_cfg.HEIGHT
     sim.recompute_navmesh(sim.pathfinder, settings, True)
+    _logger.info(f"Recomputed simulator navmesh for agent with radius {ag_cfg.RADIUS:.2f}m "
+            + "and height {ag_cfg.HEIGHT:.2f}m.")
 
 
 def check_reachability(sim: Simulator, goals: List[SpawnedObjectGoal],
                        start_pos: np.ndarray) -> None:
     for goal in goals:
-        bb = goal._bounding_box
-        shifts = np.array([[x, 0, z] for x in (0, bb.left, bb.right)
-                                     for z in (0, bb.back, bb.front)])
-        targets = np.array(goal.position)[None, :] + shifts
-        if not np.isfinite(sim.geodesic_distance(start_pos, targets)):
+        if not np.isfinite(sim.geodesic_distance(start_pos, goal.pathfinder_targets)):
             raise UnreachableGoalError(goal, start_pos)
+    else:
+        _logger.info(f"All {len(goals)} goals are reachable.")
 
 
 def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: np.ndarray,
@@ -294,13 +307,17 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
                                                      scores[visible])]
         if not goal.view_points:
             raise UnreachableGoalError(goal, start_pos)
+    _logger.info(f"All {len(goals)} goals have at least one view point.")
     return goals
 
 
 def clear_sim_from_objects(sim):
+    num_objects = 0
     for obj_id in sim.get_existing_object_ids():
         sim.remove_object(obj_id)
+        num_objects += 1
     sim.get_object_template_manager().remove_all_templates()
+    _logger.info(f"Cleared simulator from {num_objects} objects.")
 
 
 def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
@@ -356,26 +373,26 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                    goals=goals)
 
 
-def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str],
-                                       scenes_dir: str, objects_dir: str,
+def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir: str,
                                        num_episodes:int, max_goals: int,
                                        rotate_objects: ObjectRotation,
-                                       if_exist: ExistBehavior,
-                                       num_retries: int,
-                                       seed: Optional[int]=None) -> SpawnedObjectNavDatasetV0:
-    cfg = habitat.get_config(config_path, extra_config)
+                                       if_exist: ExistBehavior, num_retries: int,
+                                       seed: Optional[int]=None, verbose: int=0,
+                                       **kwargs) -> SpawnedObjectNavDatasetV0:
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
 
     try:
         dataset = habitat.make_dataset(cfg.DATASET.TYPE, config=cfg.DATASET)
         if if_exist is ExistBehavior.ABORT:
-            print("'{}' already exists, aborting".format(out_path))
-            sys.exit()
+            _logger.error(f"'{out_path}' already exists, aborting.")
+            return None
         elif if_exist is ExistBehavior.OVERRIDE:
+            _logger.warning(f"Overriding '{out_path}'.")
             dataset.episodes = []
         elif if_exist is ExistBehavior.APPEND:
-            pass
+            _logger.info(f"Appending episodes to '{out_path}'.")
     except FileNotFoundError:
+        _logger.info(f"Creating new dataset '{out_path}'.")
         dataset = habitat.make_dataset(cfg.DATASET.TYPE)
     new_episodes = []
     ep_id_gen = (f"episode_{i}" for i in itertools.count())
@@ -387,7 +404,7 @@ def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str]
     rng.shuffle(object_pool)
 
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
-    with tqdm.tqdm(total=num_episodes) as progress:
+    with tqdm.tqdm(total=num_episodes, disable=(verbose!=1)) as progress:
         for k, scene in enumerate(scene_pool):
             if num_ep_per_scene == 0 and k >= more_ep:
                 break
@@ -408,7 +425,7 @@ def generate_spawned_objectnav_dataset(config_path: str, extra_config: List[str]
                                                                      rng)
                         new_episodes.append(episode)
                     except MaxRetriesError as e:
-                        print(e)
+                        _logger.error(e)
                     progress.update()
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -425,10 +442,11 @@ _DEFAULT_ARGS: Dict[str, Any] = {"config_path": "configs/tasks/spawned_objectnav
                                  "rotate_objects": ObjectRotation.FIXED,
                                  "if_exist": ExistBehavior.ABORT,
                                  "num_retries": 4,
-                                 "seed": None}
+                                 "seed": None,
+                                 "verbose": 0}
 
 
-def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
+def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config-path", "-c")
     parser.add_argument("--scenes-dir")
@@ -441,12 +459,21 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
                         choices=list(ExistBehavior))
     parser.add_argument("--num-retries", "-r", type=int)
     parser.add_argument("--seed", "-s", type=int)
+    parser.add_argument("--verbose", "-v", action="count")
     parser.add_argument("extra_config", nargs=argparse.REMAINDER)
     parser.set_defaults(**_DEFAULT_ARGS)
-    return parser.parse_args(argv)
+    return parser.parse_args()
 
 
 if __name__ == "__main__":
-    import logging
-    habitat.logger.setLevel(logging.ERROR)
-    generate_spawned_objectnav_dataset(**vars(_parse_args()))
+    args = _parse_args()
+    if args.verbose == 0:
+        habitat.logger.setLevel(logging.ERROR)
+    elif args.verbose == 1:
+        habitat.logger.setLevel(logging.WARN)
+    elif args.verbose == 2:
+        habitat.logger.setLevel(logging.INFO)
+    elif args.verbose == 3:
+        habitat.logger.setLevel(logging.DEBUG)
+    cfg = habitat.get_config(args.config_path, args.extra_config)
+    generate_spawned_objectnav_dataset(cfg, **vars(args))
