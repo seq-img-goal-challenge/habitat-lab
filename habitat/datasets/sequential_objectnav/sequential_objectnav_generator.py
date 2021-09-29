@@ -1,6 +1,7 @@
 from typing import List, Dict, Set, Optional, Any
 import argparse
 import itertools
+import sys
 import os
 import gzip
 
@@ -78,7 +79,8 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
                                           rotate_objects: ObjectRotation,
                                           if_exist: ExistBehavior,
                                           num_retries: int,
-                                          seed: Optional[int]=None) -> None:
+                                          seed: Optional[int]=None,
+                                          no_progress=False) -> None:
     cfg = habitat.get_config(config_path, extra_config)
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
 
@@ -86,7 +88,7 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
         dataset = habitat.make_dataset(cfg.DATASET.TYPE, config=cfg.DATASET)
         if if_exist is ExistBehavior.ABORT:
             print("'{}' already exists, aborting".format(out_path))
-            sys.exit()
+            sys.exit(1)
         elif if_exist is ExistBehavior.OVERRIDE:
             dataset.episodes = []
         elif if_exist is ExistBehavior.APPEND:
@@ -101,7 +103,7 @@ def generate_sequential_objectnav_dataset(config_path: str, extra_config: List[s
     object_pool = create_object_pool(objects_dir)
 
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
-    with tqdm.tqdm(total=num_episodes) as progress:
+    with tqdm.tqdm(total=num_episodes, disable=no_progress) as progress:
         for k, scene in enumerate(scene_pool):
             if num_ep_per_scene == 0 and k >= more_ep:
                 break
@@ -159,6 +161,7 @@ def _parse_args(argv: Optional[List[str]]=None) -> argparse.Namespace:
                         choices=list(ExistBehavior))
     parser.add_argument("--num-retries", "-r", type=int)
     parser.add_argument("--seed", "-s", type=int)
+    parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("extra_config", nargs=argparse.REMAINDER)
     parser.set_defaults(**_DEFAULT_ARGS)
     return parser.parse_args(argv)
