@@ -32,7 +32,8 @@ from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
 
 
-_logger = habitat.logger.getChild(os.path.basename(__file__))
+_filename, _ = os.path.splitext(os.path.basename(__file__))
+_logger = habitat.logger.getChild(_filename)
 _handler = logging.StreamHandler()
 _handler.setFormatter(logging.Formatter("[{asctime}] {levelname} ({name}): {msg}", style='{'))
 _logger.addHandler(_handler)
@@ -171,14 +172,14 @@ def create_object_pool(objects_dir: str) -> List[ObjectPoolCategory]:
         sorted(entry.path for entry in os.scandir(dir_entry.path)
                if entry.is_file() and entry.name.endswith(DEFAULT_OBJECT_PATH_EXT))
     ) for i, dir_entry in enumerate(os.scandir(objects_dir)) if dir_entry.is_dir())
-    _logger.info(f"Created pool of {len(pool)} object categories.")
+    _logger.debug(f"Created pool of {len(pool)} object categories.")
     return pool
 
 
 def create_scene_pool(scenes_dir: str) -> List[str]:
     pool = sorted(glob.glob(os.path.join(scenes_dir, "**", f"*{DEFAULT_SCENE_PATH_EXT}"),
                             recursive=True))
-    _logger.info(f"Created pool of {len(pool)} scenes.")
+    _logger.debug(f"Created pool of {len(pool)} scenes.")
     return pool
 
 
@@ -225,8 +226,8 @@ def spawn_objects(sim: Simulator,
         goal._bounding_box = obj_node.cumulative_bb
         goals.append(goal)
 
-    _logger.info(f"Spawned {num_objects} objects "
-                 + "with {rotate_objects.name.lower()} rotations in simulator.")
+    _logger.debug(f"Spawned {num_objects} objects "
+                  + "with {rotate_objects.name.lower()} rotations in simulator.")
     return goals
 
 
@@ -238,8 +239,8 @@ def recompute_navmesh_with_static_objects(sim):
     settings.agent_radius = ag_cfg.RADIUS
     settings.agent_height = ag_cfg.HEIGHT
     sim.recompute_navmesh(sim.pathfinder, settings, True)
-    _logger.info(f"Recomputed simulator navmesh for agent with radius {ag_cfg.RADIUS:.2f}m "
-            + "and height {ag_cfg.HEIGHT:.2f}m.")
+    _logger.debug(f"Recomputed simulator navmesh for agent with radius {ag_cfg.RADIUS:.2f}m "
+                  + "and height {ag_cfg.HEIGHT:.2f}m.")
 
 
 def check_reachability(sim: Simulator, goals: List[SpawnedObjectGoal],
@@ -248,7 +249,7 @@ def check_reachability(sim: Simulator, goals: List[SpawnedObjectGoal],
         if not np.isfinite(sim.geodesic_distance(start_pos, goal.pathfinder_targets)):
             raise UnreachableGoalError(goal, start_pos)
     else:
-        _logger.info(f"All {len(goals)} goals are reachable.")
+        _logger.debug(f"All {len(goals)} goals are reachable.")
 
 
 def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: np.ndarray,
@@ -307,7 +308,7 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
                                                      scores[visible])]
         if not goal.view_points:
             raise UnreachableGoalError(goal, start_pos)
-    _logger.info(f"All {len(goals)} goals have at least one view point.")
+    _logger.debug(f"All {len(goals)} goals have at least one view point.")
     return goals
 
 
@@ -317,7 +318,7 @@ def clear_sim_from_objects(sim):
         sim.remove_object(obj_id)
         num_objects += 1
     sim.get_object_template_manager().remove_all_templates()
-    _logger.info(f"Cleared simulator from {num_objects} objects.")
+    _logger.debug(f"Cleared simulator from {num_objects} objects.")
 
 
 def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
@@ -364,13 +365,15 @@ def generate_spawned_objectnav_episode(sim: Simulator,
     else:
         raise MaxRetriesError("generate reachable goals", num_retries, errors)
 
-    return SpawnedObjectNavEpisode(episode_id=ep_id,
-                                   scene_id=sim.habitat_config.SCENE,
-                                   start_position=start_pos,
-                                   start_rotation=start_rot,
-                                   object_category=category,
-                                   object_category_index=cat_index,
-                                   goals=goals)
+    episode= SpawnedObjectNavEpisode(episode_id=ep_id,
+                                     scene_id=sim.habitat_config.SCENE,
+                                     start_position=start_pos,
+                                     start_rotation=start_rot,
+                                     object_category=category,
+                                     object_category_index=cat_index,
+                                     goals=goals)
+    _logger.info(f"Successfully generated episode '{ep_id}'.")
+    return episode
 
 
 def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir: str,
@@ -431,6 +434,7 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with gzip.open(out_path, 'wt') as f:
         f.write(dataset.to_json())
+    _logger.info(f"Wrote {len(new_episodes)} episodes to '{out_path}'.")
     return dataset
 
 

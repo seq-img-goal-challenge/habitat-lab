@@ -21,7 +21,8 @@ from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNa
                                                               SequentialObjectNavEpisode
 
 
-_logger = habitat.logger.getChild(os.path.basename(__file__))
+_filename, _ = os.path.splitext(os.path.basename(__file__))
+_logger = habitat.logger.getChild(_filename)
 _handler = logging.StreamHandler()
 _handler.setFormatter(logging.Formatter("[{asctime}] {levelname} ({name}): {msg}", style='{'))
 _logger.addHandler(_handler)
@@ -88,7 +89,6 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
                                           seed: Optional[int]=None, verbose: int=0,
                                           **kwargs) -> SequentialObjectNavDatasetV0:
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
-
     try:
         dataset = habitat.make_dataset(cfg.DATASET.TYPE, config=cfg.DATASET)
         if if_exist is ExistBehavior.ABORT:
@@ -104,11 +104,9 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
         dataset = habitat.make_dataset(cfg.DATASET.TYPE)
     new_episodes = []
     ep_id = (str(i) for i in itertools.count())
-
     rng = np.random.default_rng(seed)
     scene_pool = create_scene_pool(scenes_dir)
     object_pool = create_object_pool(objects_dir)
-
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
     with tqdm.tqdm(total=num_episodes, disable=(verbose != 1)) as progress:
         for k, scene in enumerate(scene_pool):
@@ -122,15 +120,10 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
                     sim.seed(seed + k)
                 for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                     try:
-                        episode = generate_sequential_objectnav_episode(sim,
-                                                                        next(ep_id),
-                                                                        min_seq_len,
-                                                                        max_seq_len,
-                                                                        max_goals,
-                                                                        object_pool,
-                                                                        rotate_objects,
-                                                                        num_retries,
-                                                                        rng)
+                        episode = generate_sequential_objectnav_episode(
+                                sim, next(ep_id), min_seq_len, max_seq_len, max_goals,
+                                object_pool, rotate_objects, num_retries, rng
+                        )
                         new_episodes.append(episode)
                     except MaxRetriesError as e:
                         _logger.error(e)
