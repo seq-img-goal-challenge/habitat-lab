@@ -143,11 +143,12 @@ class UnreachableGoalError(Exception):
         self.start_pos = start_pos
 
     def __str__(self) -> str:
-        cat = self.goal.object_template_id.split('/')[-2]
+        cat, mdl = self.goal.object_template_id.split('/')[-2:]
+        tmpl = '/'.join((cat, mdl[:-len(DEFAULT_OBJECT_PATH_EXT)]))
         s_pos_str = '[' + ','.join(f"{x:.3f}" for x in self.start_pos) + ']'
         g_pos_str = '[' + ','.join(f"{x:.3f}" for x in self.goal.position) + ']'
         return f"Could not find view points reachable from {s_pos_str} " \
-                + f"for goal '{cat}' at position {g_pos_str}."
+                + f"for goal '{tmpl}' at position {g_pos_str}."
 
 
 class MaxRetriesError(Exception):
@@ -372,8 +373,7 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                      object_category=category,
                                      object_category_index=cat_index,
                                      goals=goals)
-    _logger.info(f"Successfully generated episode '{ep_id}' "
-                 + "in scene '{episode.scene_id}' with object '{category}'.")
+    _logger.info(f"Successfully generated episode '{ep_id}'.")
     return episode
 
 
@@ -399,14 +399,11 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
         _logger.info(f"Creating new dataset '{out_path}'.")
         dataset = habitat.make_dataset(cfg.DATASET.TYPE)
     new_episodes = []
-    ep_id_gen = (f"episode_{i}" for i in itertools.count())
-
     rng = np.random.default_rng(seed)
     scene_pool = create_scene_pool(scenes_dir)
     rng.shuffle(scene_pool)
     object_pool = create_object_pool(objects_dir)
     rng.shuffle(object_pool)
-
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
     with tqdm.tqdm(total=num_episodes, disable=(verbose!=1)) as progress:
         for k, scene in enumerate(scene_pool):
@@ -415,18 +412,16 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
             cfg.SIMULATOR.defrost()
             cfg.SIMULATOR.SCENE = scene
             cfg.freeze()
+            scene_name = os.path.basename(scene)[:-len(DEFAULT_SCENE_PATH_EXT)]
             with habitat.sims.make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
                 if seed is not None:
                     sim.seed(seed + k)
-                for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
+                for ep_idx in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                     try:
-                        episode = generate_spawned_objectnav_episode(sim,
-                                                                     next(ep_id_gen),
-                                                                     max_goals,
-                                                                     object_pool,
-                                                                     rotate_objects,
-                                                                     num_retries,
-                                                                     rng)
+                        episode = generate_spawned_objectnav_episode(
+                                sim, f"{scene_name}_{ep_idx}", max_goals, object_pool,
+                                rotate_objects, num_retries, rng
+                        )
                         new_episodes.append(episode)
                     except MaxRetriesError as e:
                         _logger.error(e)
