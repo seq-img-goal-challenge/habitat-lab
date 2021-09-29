@@ -89,6 +89,7 @@ SequentialOnlinePointGoalSensor = make_sequential(IntegratedPointGoalGPSAndCompa
 class SequentialMapSensor(Sensor):
     _sim: Simulator
     _last_ep_id: Optional[str]
+    _last_step_idx: Optional[int]
     _topdown_map: Optional[np.ndarray]
     _fog: Optional[np.ndarray]
     _origin: Optional[np.ndarray]
@@ -97,6 +98,7 @@ class SequentialMapSensor(Sensor):
     def __init__(self, sim: Simulator, config: Config, *args: Any, **kwargs: Any) -> None:
         self._sim = sim
         self._last_ep_id = None
+        self._last_step_idx = None
         self._topdown_map = None
         self._fog = None
         self._origin = None
@@ -130,13 +132,20 @@ class SequentialMapSensor(Sensor):
             self._origin[0] -= oj * self._mppx
             self._origin[1] = altitude
             self._origin[2] -= oi * self._mppx
-            for step in episode.steps:
+            self._fog = np.zeros_like(self._topdown_map)
+
+        if self._last_ep_id != episode.episode_id \
+                or self._last_step_idx != episode._current_step_index:
+            for t, step in enumerate(episode.steps):
                 for goal in step.goals:
                     j, _, i = ((goal.position - self._origin) / self._mppx).astype(np.int64)
-                    cv2.circle(self._topdown_map, (j, i), mrk,
-                               maps.MAP_TARGET_POINT_INDICATOR, -1)
-            self._fog = np.zeros_like(self._topdown_map)
+                    if t == episode._current_step_index:
+                        indic = maps.MAP_NEXT_TARGET_POINT_INDICATOR
+                    else:
+                        indic = maps.MAP_TARGET_POINT_INDICATOR
+                    cv2.circle(self._topdown_map, (j, i), mrk, indic, -1)
             self._last_ep_id = episode.episode_id
+            self._last_step_idx = episode._current_step_index
 
         s = self._sim.get_agent_state()
         j, _, i = ((s.position - self._origin) / self._mppx).astype(np.int64)
@@ -156,12 +165,14 @@ class SequentialMapSensor(Sensor):
 class SequentialEgoMapSensor(Sensor):
     _sim: Simulator
     _last_ep_id: Optional[str]
+    _last_step_idx: Optional[int]
     _topdown_map: Optional[np.ndarray]
     _fog: Optional[np.ndarray]
 
     def __init__(self, sim: Simulator, config: Config, *args: Any, **kwargs: Any) -> None:
         self._sim = sim
         self._last_ep_id = None
+        self._last_step_idx = None
         self._topdown_map = None
         self._fog = None
         super().__init__(*args, sim=sim, config=config, **kwargs)
@@ -182,14 +193,21 @@ class SequentialEgoMapSensor(Sensor):
         mppx = self.config.METERS_PER_PIXEL
         if self._last_ep_id != episode.episode_id:
             self._topdown_map = maps.get_topdown_map_from_sim(self._sim, meters_per_pixel=mppx)
-            for step in episode.steps:
+            self._fog = np.zeros_like(self._topdown_map)
+
+        if self._last_ep_id != episode.episode_id \
+                or self._last_step_idx != episode._current_step_index:
+            for t, step in enumerate(episode.steps):
                 for goal in step.goals:
                     i, j = maps.to_grid(goal.position[2], goal.position[0],
                                         self._topdown_map.shape, self._sim)
-                    cv2.circle(self._topdown_map, (j, i), mrk,
-                               maps.MAP_TARGET_POINT_INDICATOR, -1)
-            self._fog = np.zeros_like(self._topdown_map)
+                    if t == episode._current_step_index:
+                        indic = maps.MAP_NEXT_TARGET_POINT_INDICATOR
+                    else:
+                        indic = maps.MAP_TARGET_POINT_INDICATOR
+                    cv2.circle(self._topdown_map, (j, i), mrk, indic, -1)
             self._last_ep_id = episode.episode_id
+            self._last_step_idx = episode._current_step_index
 
         s = self._sim.get_agent_state()
         i, j = maps.to_grid(s.position[2], s.position[0], self._topdown_map.shape, self._sim)
@@ -245,8 +263,15 @@ class SequentialTopDownMap(TopDownMap):
             super()._draw_goals_view_points(step)
 
     def _draw_goals_positions(self, episode: SequentialEpisode) -> None:
-        for step in episode.steps:
-            super()._draw_goals_positions(step)
+        for t, step in enumerate(episode.steps):
+            if t == episode._current_step_index:
+                if self._config.DRAW_GOAL_POSITIONS:
+                    for goal in step.goals:
+                        if self._is_on_same_floor(goal.position[1]):
+                            super()._draw_point(goal.position,
+                                                maps.MAP_NEXT_TARGET_POINT_INDICATOR)
+            else:
+                super()._draw_goals_positions(step)
 
     def _draw_goals_aabb(self, episode: SequentialEpisode) -> None:
         for step in episode.steps:

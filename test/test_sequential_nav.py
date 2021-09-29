@@ -381,14 +381,15 @@ def test_ego_map_sensor():
     from habitat.tasks import make_task
     from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
     from habitat.tasks.nav.shortest_path_follower import ShortestPathFollower
-    from habitat.utils.visualizations.maps import (MAP_INVALID_POINT,
-                                                   MAP_TARGET_POINT_INDICATOR,
+    from habitat.utils.visualizations.maps import (MAP_TARGET_POINT_INDICATOR,
+                                                   MAP_NEXT_TARGET_POINT_INDICATOR,
                                                    MAP_SOURCE_POINT_INDICATOR)
     cfg = get_config()
     cfg.TASK.defrost()
     cfg.TASK.TYPE = "SequentialNav-v0"
     cfg.TASK.POSSIBLE_ACTIONS = ["FOUND", "MOVE_FORWARD", "TURN_LEFT", "TURN_RIGHT"]
     cfg.TASK.SENSORS = ["SEQUENTIAL_EGO_MAP_SENSOR"]
+    cfg.TASK.SEQUENTIAL_EGO_MAP_SENSOR.FOG_OF_WAR = False
     cfg.TASK.freeze()
     with make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
         sim.seed(456123)
@@ -411,12 +412,15 @@ def test_ego_map_sensor():
             ego_map = obs["ego_map"]
             assert ego_map.shape == (res, res)
             s = sim.get_agent_state()
-            for step in episode.steps:
+            for t, step in enumerate(episode.steps):
                 rel_pos = step.goals[0].position - s.position
                 rel_pos = (s.rotation.conj() * np.quaternion(0, *rel_pos) * s.rotation).vec
                 j, _, i = (rel_pos / mppx).astype(np.int64) + res // 2
                 if 0 <= i < res and 0 <= j < res:
-                    assert ego_map[i, j] in (MAP_INVALID_POINT, MAP_TARGET_POINT_INDICATOR)
+                    if t == episode._current_step_index:
+                        assert ego_map[i, j] == MAP_NEXT_TARGET_POINT_INDICATOR
+                    else:
+                        assert ego_map[i, j] == MAP_TARGET_POINT_INDICATOR
 
 
 def test_sequential_top_down_map():
@@ -424,7 +428,9 @@ def test_sequential_top_down_map():
     from habitat.sims import make_sim
     from habitat.tasks import make_task
     from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
-    from habitat.utils.visualizations.maps import to_grid, MAP_TARGET_POINT_INDICATOR
+    from habitat.utils.visualizations.maps import (to_grid, 
+                                                   MAP_NEXT_TARGET_POINT_INDICATOR,
+                                                   MAP_TARGET_POINT_INDICATOR)
 
     cfg = get_config()
     cfg.TASK.defrost()
@@ -463,10 +469,13 @@ def test_sequential_top_down_map():
         assert isinstance(phi, float)
         assert 0 <= phi <= 2 * np.pi
 
-        for step in episode.steps:
+        for t, step in enumerate(episode.steps):
             x, _, z = step.goals[0].position
             ij = to_grid(z, x, topdown_map.shape, sim)
-            assert topdown_map[ij] == MAP_TARGET_POINT_INDICATOR
+            if t == episode._current_step_index:
+                assert topdown_map[ij] == MAP_NEXT_TARGET_POINT_INDICATOR
+            else:
+                assert topdown_map[ij] == MAP_TARGET_POINT_INDICATOR
 
 
 def test_distance_to_next_goal():

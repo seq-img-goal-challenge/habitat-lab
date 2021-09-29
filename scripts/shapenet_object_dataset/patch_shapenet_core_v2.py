@@ -162,5 +162,6 @@ for short_tmpl_id in tqdm.tqdm((
     if os.path.isdir(dirpath):
         logging.info(f"Recursively deleting directory '{dirpath}'")
         shutil.rmtree(dirpath)
+        os.remove(dirpath + ".object_config.json")
     else:
         logging.warning(f"'{dirpath}' not found.")
