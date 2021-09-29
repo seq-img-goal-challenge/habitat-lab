@@ -75,11 +75,14 @@ def generate_sequential_objectnav_episode(sim: Simulator,
                                      object_category_index=cat_index,
                                      goals=goals[first:last])
              for category, cat_index, first, last in step_splits]
-    return SequentialObjectNavEpisode(episode_id=ep_id,
-                                      scene_id=sim.habitat_config.SCENE,
-                                      start_position=start_pos,
-                                      start_rotation=start_rot,
-                                      steps=steps)
+    episode = SequentialObjectNavEpisode(episode_id=ep_id,
+                                         scene_id=sim.habitat_config.SCENE,
+                                         start_position=start_pos,
+                                         start_rotation=start_rot,
+                                         steps=steps)
+    _logger.info(f"Successfully generated episode '{ep_id}' "
+                 + "in scene '{episode.scene_id}' with objects {selected_categories}.")
+    return episode
 
 
 def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir: str,
@@ -132,6 +135,7 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with gzip.open(out_path, 'wt') as f:
         f.write(dataset.to_json())
+    _logger.info(f"Wrote {len(new_episodes)} episodes to '{out_path}'.")
     return dataset
 
 
