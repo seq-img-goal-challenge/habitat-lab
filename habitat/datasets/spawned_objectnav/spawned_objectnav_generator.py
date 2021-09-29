@@ -372,7 +372,8 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                      object_category=category,
                                      object_category_index=cat_index,
                                      goals=goals)
-    _logger.info(f"Successfully generated episode '{ep_id}'.")
+    _logger.info(f"Successfully generated episode '{ep_id}' "
+                 + "in scene '{episode.scene_id}' with object '{category}'.")
     return episode
 
 
