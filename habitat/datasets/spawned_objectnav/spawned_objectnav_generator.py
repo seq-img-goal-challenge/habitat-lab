@@ -384,7 +384,7 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
                                        seed: Optional[int]=None, verbose: int=0,
                                        **kwargs) -> SpawnedObjectNavDatasetV0:
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
-
+    idx0 = 0
     try:
         dataset = habitat.make_dataset(cfg.DATASET.TYPE, config=cfg.DATASET)
         if if_exist is ExistBehavior.ABORT:
@@ -394,6 +394,7 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
             _logger.warning(f"Overriding '{out_path}'.")
             dataset.episodes = []
         elif if_exist is ExistBehavior.APPEND:
+            idx0 = len(dataset.episodes)
             _logger.info(f"Appending episodes to '{out_path}'.")
     except FileNotFoundError:
         _logger.info(f"Creating new dataset '{out_path}'.")
@@ -416,11 +417,11 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
             with habitat.sims.make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
                 if seed is not None:
                     sim.seed(seed + k)
-                for ep_idx in range(num_ep_per_scene + (1 if k < more_ep else 0)):
+                for idx in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                     try:
                         episode = generate_spawned_objectnav_episode(
-                                sim, f"{scene_name}_{ep_idx}", max_goals, object_pool,
-                                rotate_objects, num_retries, rng
+                                sim, f"{scene_name}_{idx0 + idx}", max_goals,
+                                object_pool, rotate_objects, num_retries, rng
                         )
                         new_episodes.append(episode)
                     except MaxRetriesError as e:
