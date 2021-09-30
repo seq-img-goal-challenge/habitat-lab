@@ -1,5 +1,5 @@
-import os.path
 from typing import Optional, Tuple, Dict
+import os.path
 
 import numpy as np
 import quaternion
@@ -20,8 +20,11 @@ HABITAT_OBJECT_PATH_PREFIX = os.path.normpath(os.path.join(HABITAT_INSTALL_DIR, 
                                                            DEFAULT_OBJECT_PATH_PREFIX))
 
 
-def find_scene_file(scene_id):
-    for prefix in ('.', DEFAULT_SCENE_PATH_PREFIX, HABITAT_SCENE_PATH_PREFIX):
+def find_scene_file(scene_id: str, scenes_dir: Optional[str]=None) -> str:
+    candidates = ('.', DEFAULT_SCENE_PATH_PREFIX, HABITAT_SCENE_PATH_PREFIX)
+    if scenes_dir is not None:
+        candidates = (scenes_dir,) + candidates
+    for prefix in candidates:
         for ext in ('', DEFAULT_SCENE_PATH_EXT):
             path = os.path.join(prefix, scene_id + ext)
             if os.path.isfile(path):
@@ -29,8 +32,11 @@ def find_scene_file(scene_id):
     raise FileNotFoundError("Could not find scene file '{}'".format(scene_id))
 
 
-def find_object_config_file(tmpl_id):
-    for prefix in ('.', DEFAULT_OBJECT_PATH_PREFIX, HABITAT_OBJECT_PATH_PREFIX):
+def find_object_config_file(tmpl_id: str, objects_dir: Optional[str]=None) -> str:
+    candidates = ('.', DEFAULT_OBJECT_PATH_PREFIX, HABITAT_OBJECT_PATH_PREFIX)
+    if objects_dir is not None:
+        candidates = (objects_dir,) + candidates
+    for prefix in candidates:
         for ext in ('', DEFAULT_OBJECT_PATH_EXT):
             path = os.path.join(prefix, tmpl_id + ext)
             if os.path.isfile(path):
@@ -38,22 +44,28 @@ def find_object_config_file(tmpl_id):
     raise FileNotFoundError("Could not find object config file for '{}'".format(tmpl_id))
 
 
-def strip_scene_id(scene_id):
+def strip_scene_id(scene_id: str, scenes_dir: Optional[str]=None) -> str:
     if scene_id.endswith(DEFAULT_SCENE_PATH_EXT):
         scene_id = scene_id[:-len(DEFAULT_SCENE_PATH_EXT)]
-    for prefix in (DEFAULT_SCENE_PATH_PREFIX, HABITAT_SCENE_PATH_PREFIX):
+    candidates = ('.', DEFAULT_SCENE_PATH_PREFIX, HABITAT_SCENE_PATH_PREFIX)
+    if scenes_dir is not None:
+        candidates = (scenes_dir,) + candidates
+    for prefix in candidates:
         if scene_id.startswith(prefix):
-            scene_id = scene_id[len(prefix):]
+            scene_id = scene_id[len(prefix):].strip('/')
             return scene_id
     return scene_id
 
 
-def strip_object_template_id(obj_tmpl_id):
+def strip_object_template_id(obj_tmpl_id, objects_dir):
     if obj_tmpl_id.endswith(DEFAULT_OBJECT_PATH_EXT):
         obj_tmpl_id = obj_tmpl_id[:-len(DEFAULT_OBJECT_PATH_EXT)]
-    for prefix in (DEFAULT_OBJECT_PATH_PREFIX, HABITAT_OBJECT_PATH_PREFIX):
+    candidates = ('.', DEFAULT_OBJECT_PATH_PREFIX, HABITAT_OBJECT_PATH_PREFIX)
+    if objects_dir is not None:
+        candidates = (objects_dir,) + candidates
+    for prefix in candidates:
         if obj_tmpl_id.startswith(prefix):
-            obj_tmpl_id = obj_tmpl_id[len(prefix):]
+            obj_tmpl_id = obj_tmpl_id[len(prefix):].strip('/')
             return obj_tmpl_id
     return obj_tmpl_id
 
