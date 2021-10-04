@@ -1,5 +1,6 @@
 from typing import List, Dict, Set, Optional, Any
 import json
+import os.path
 
 import numpy as np
 
@@ -17,6 +18,10 @@ from habitat.tasks.nav.spawned_objectnav import ViewPoint, SpawnedObjectGoal, \
 @registry.register_dataset(name="SpawnedObjectNav-v0")
 class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
     episodes: List[SpawnedObjectNavEpisode]
+    _scn_prefix: Optional[str] = None
+    _scn_ext: Optional[str] = None
+    _obj_prefix: Optional[str] = None
+    _obj_ext: Optional[str] = None
 
     def __init__(self, config: Optional[Config]=None):
         self.config = config
@@ -39,12 +44,24 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
 
     def _json_hook(self, raw_dict):
         if "episode_id" in raw_dict:
-            scenes_dir = None if self.config is None else self.config.SCENES_DIR
-            raw_dict["scene_id"] = find_scene_file(raw_dict["scene_id"], scenes_dir)
+            if self._scn_prefix is None:
+                scenes_dir = None if self.config is None else self.config.SCENES_DIR
+                raw_dict["scene_id"], self._scn_prefix, self._scn_ext = find_scene_file(
+                    raw_dict["scene_id"], scenes_dir
+                )
+            else:
+                raw_dict["scene_id"] = os.path.join(self._scn_prefix,
+                                                    raw_dict["scene_id"] + self._scn_ext)
             return SpawnedObjectNavEpisode(**raw_dict)
         elif "object_template_id" in raw_dict:
             objects_dir = None if self.config is None else self.config.OBJECTS_DIR
-            obj_tmpl_id = find_object_config_file(raw_dict["object_template_id"], objects_dir)
+            if self._obj_prefix is None:
+                obj_tmpl_id, self._obj_prefix, self._obj_ext = find_object_config_file(
+                    raw_dict["object_template_id"], objects_dir
+                )
+            else:
+                obj_tmpl_id = os.path.join(self._obj_prefix,
+                                           raw_dict["object_template_id"] + self._obj_ext)
             raw_dict["object_template_id"] = obj_tmpl_id
             return SpawnedObjectGoal(**raw_dict)
         elif "iou" in raw_dict:

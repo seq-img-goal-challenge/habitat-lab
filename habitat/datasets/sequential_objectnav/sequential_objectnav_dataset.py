@@ -35,18 +35,8 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset)
         return max(step.object_category_index
                    for episode in self.episodes for step in episode.steps)
 
-    @staticmethod
-    def _json_hook(raw_dict):
-        if "episode_id" in raw_dict:
-            raw_dict["scene_id"] = find_scene_file(raw_dict["scene_id"])
-            return SequentialObjectNavEpisode(**raw_dict)
-        elif "object_category" in raw_dict:
+    def _json_hook(self, raw_dict):
+        if "object_category" in raw_dict:
             return SequentialObjectNavStep(**raw_dict)
-        elif "object_template_id" in raw_dict:
-            obj_tmpl_id = find_object_config_file(raw_dict["object_template_id"])
-            raw_dict["object_template_id"] = obj_tmpl_id
-            return SpawnedObjectGoal(**raw_dict)
-        elif "iou" in raw_dict:
-            return ViewPoint(**raw_dict)
         else:
-            return raw_dict
+            return super()._json_hook(raw_dict)
