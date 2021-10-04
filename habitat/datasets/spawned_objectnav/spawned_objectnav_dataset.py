@@ -54,7 +54,7 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
 
     def from_json(self, json_str: str, scenes_dir: Optional[str]=None) -> None:
         deserialized = json.loads(json_str, object_hook=self._json_hook)
-        self.episodes.append(deserialized["episodes"])
+        self.episodes.extend(deserialized["episodes"])
 
     def _json_default(self, obj: object) -> Dict[str, Any]:
         if isinstance(obj, np.ndarray):

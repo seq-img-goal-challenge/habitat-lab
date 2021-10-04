@@ -17,22 +17,6 @@ from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNa
 class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset):
     episodes: List[SequentialObjectNavEpisode]
 
-    @staticmethod
-    def _json_hook(raw_dict):
-        if "episode_id" in raw_dict:
-            raw_dict["scene_id"] = find_scene_file(raw_dict["scene_id"])
-            return SequentialObjectNavEpisode(**raw_dict)
-        elif "object_category" in raw_dict:
-            return SequentialObjectNavStep(**raw_dict)
-        elif "object_template_id" in raw_dict:
-            obj_tmpl_id = find_object_config_file(raw_dict["object_template_id"])
-            raw_dict["object_template_id"] = obj_tmpl_id
-            return SpawnedObjectGoal(**raw_dict)
-        elif "iou" in raw_dict:
-            return ViewPoint(**raw_dict)
-        else:
-            return raw_dict
-
     def get_objects_to_load(self,
                             episode: Optional[SequentialObjectNavEpisode]=None) -> Set[str]:
         if episode is None:
@@ -51,6 +35,18 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset)
         return max(step.object_category_index
                    for episode in self.episodes for step in episode.steps)
 
-    def from_json(self, json_str: str, scenes_dir: Optional[str]=None) -> None:
-        deserialized = json.loads(json_str, object_hook=self._json_hook)
-        self.episodes.append(deserialized["episodes"])
+    @staticmethod
+    def _json_hook(raw_dict):
+        if "episode_id" in raw_dict:
+            raw_dict["scene_id"] = find_scene_file(raw_dict["scene_id"])
+            return SequentialObjectNavEpisode(**raw_dict)
+        elif "object_category" in raw_dict:
+            return SequentialObjectNavStep(**raw_dict)
+        elif "object_template_id" in raw_dict:
+            obj_tmpl_id = find_object_config_file(raw_dict["object_template_id"])
+            raw_dict["object_template_id"] = obj_tmpl_id
+            return SpawnedObjectGoal(**raw_dict)
+        elif "iou" in raw_dict:
+            return ViewPoint(**raw_dict)
+        else:
+            return raw_dict
