@@ -28,7 +28,7 @@ def find_scene_file(scene_id: str, scenes_dir: Optional[str]=None) -> str:
         for ext in ('', DEFAULT_SCENE_PATH_EXT):
             path = os.path.join(prefix, scene_id + ext)
             if os.path.isfile(path):
-                return path
+                return path, prefix, ext
     raise FileNotFoundError("Could not find scene file '{}'".format(scene_id))
 
 
@@ -40,7 +40,7 @@ def find_object_config_file(tmpl_id: str, objects_dir: Optional[str]=None) -> st
         for ext in ('', DEFAULT_OBJECT_PATH_EXT):
             path = os.path.join(prefix, tmpl_id + ext)
             if os.path.isfile(path):
-                return path
+                return path, prefix, ext
     raise FileNotFoundError("Could not find object config file for '{}'".format(tmpl_id))
 
 
@@ -52,7 +52,7 @@ def strip_scene_id(scene_id: str, scenes_dir: Optional[str]=None) -> str:
         candidates = (scenes_dir,) + candidates
     for prefix in candidates:
         if scene_id.startswith(prefix):
-            scene_id = scene_id[len(prefix):].strip('/')
+            scene_id = scene_id[len(prefix):].strip('/.')
             return scene_id
     return scene_id
 
@@ -65,7 +65,7 @@ def strip_object_template_id(obj_tmpl_id, objects_dir):
         candidates = (objects_dir,) + candidates
     for prefix in candidates:
         if obj_tmpl_id.startswith(prefix):
-            obj_tmpl_id = obj_tmpl_id[len(prefix):].strip('/')
+            obj_tmpl_id = obj_tmpl_id[len(prefix):].strip('/.')
             return obj_tmpl_id
     return obj_tmpl_id
 
