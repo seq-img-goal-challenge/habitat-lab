@@ -53,4 +53,4 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset)
 
     def from_json(self, json_str: str, scenes_dir: Optional[str]=None) -> None:
         deserialized = json.loads(json_str, object_hook=self._json_hook)
-        self.episodes = deserialized["episodes"]
+        self.episodes.append(deserialized["episodes"])
