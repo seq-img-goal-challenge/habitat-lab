@@ -6,7 +6,7 @@ from habitat.core.registry import registry
 from habitat.datasets.pointnav.pointnav_dataset import DEFAULT_SCENE_PATH_PREFIX
 from habitat.datasets.spawned_objectnav.spawned_objectnav_dataset \
         import SpawnedObjectNavDatasetV0
-from habitat.datasets.spawned_objectnav.utils import find_scene_file, find_object_config_file
+from habitat.datasets.spawned_objectnav.utils import find_scene_file
 from habitat.tasks.nav.spawned_objectnav import ViewPoint, SpawnedObjectGoal
 from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
 from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNavStep, \
@@ -36,7 +36,17 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset)
                    for episode in self.episodes for step in episode.steps)
 
     def _json_hook(self, raw_dict):
-        if "object_category" in raw_dict:
+        if "episode_id" in raw_dict:
+            if self._scn_prefix is None:
+                scenes_dir = None if self.config is None else self.config.SCENES_DIR
+                raw_dict["scene_id"], self._scn_prefix, self._scn_ext = find_scene_file(
+                    raw_dict["scene_id"], scenes_dir
+                )
+            else:
+                raw_dict["scene_id"] = os.path.join(self._scn_prefix,
+                                                    raw_dict["scene_id"] + self._scn_ext)
+            return SequentialObjectNavEpisode(**raw_dict)
+        elif "object_category" in raw_dict:
             return SequentialObjectNavStep(**raw_dict)
         else:
             return super()._json_hook(raw_dict)
