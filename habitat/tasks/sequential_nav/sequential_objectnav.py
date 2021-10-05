@@ -40,30 +40,3 @@ SequentialObjectGoalCategorySensor = make_sequential(SpawnedObjectGoalCategorySe
                                                      name="SequentialObjectGoalCategorySensor")
 SequentialObjectGoalAppearanceSensor = make_sequential(SpawnedObjectGoalAppearanceSensor,
                                                        name="SequentialObjectGoalAppearanceSensor")
-
-@registry.register_measure
-class DistanceToNextObject(DistanceToNextGoal):
-    _step_targets: List[List[float]]
-
-    def __init__(self, *args: Any, sim: Simulator, **kwargs: Any) -> None:
-        super().__init__(*args, sim=sim, **kwargs)
-        self._step_targets = []
-
-    def _get_targets_for_goal(self, goal: SpawnedObjectGoal):
-        bb = goal._bounding_box
-        shifts = np.array([[x, 0, z] for x in (0, bb.left, bb.right)
-                                     for z in (0, bb.back, bb.front)])
-        targets = np.array(goal.position)[None, :] + shifts
-        return targets.tolist()
-
-    def _update_step_targets(self, episode: SequentialObjectNavEpisode) -> None:
-        idx = min(episode._current_step_index, episode.num_steps - 1)
-        self._step_targets = []
-        for goal in episode.steps[idx].goals:
-            self._step_targets.extend(self._get_targets_for_goal(goal))
-
-    def _compute_distance(self, pos: np.ndarray,
-                                episode: SequentialObjectNavEpisode) -> float:
-        if not self._step_targets or self._last_step_index != episode._current_step_index:
-            self._update_step_targets(episode)
-        return self._sim.geodesic_distance(pos, self._step_targets)

@@ -23,11 +23,12 @@ from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, ViewPoint, \
 from habitat.datasets.spawned_objectnav.spawned_objectnav_dataset \
         import SpawnedObjectNavDatasetV0
 from habitat.datasets.spawned_objectnav.spawn_pos_distrib import SpawnPositionDistribution
-from habitat.datasets.spawned_objectnav.utils import DEFAULT_SCENE_PATH_EXT, \
-                                                     DEFAULT_OBJECT_PATH_EXT, \
-                                                     get_uniform_view_pt_positions, \
-                                                     get_view_pt_rotations, \
-                                                     render_view_pts
+from habitat.datasets.spawned_objectnav.utils import (DEFAULT_SCENE_PATH_EXT,
+                                                      DEFAULT_OBJECT_PATH_EXT,
+                                                      get_uniform_view_pt_positions,
+                                                      get_view_pt_rotations,
+                                                      render_view_pts,
+                                                      DebugMapRenderer)
 from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
 
@@ -37,63 +38,7 @@ _logger = habitat.logger.getChild(_filename)
 _handler = logging.StreamHandler()
 _handler.setFormatter(logging.Formatter("[{asctime}] {levelname} ({name}): {msg}", style='{'))
 _logger.addHandler(_handler)
-
-
-class _DebugRenderer:
-    def __init__(self, outdir="out/spawned_objectnav_generator_debug/"):
-        self.outdir = outdir
-        os.makedirs(self.outdir, exist_ok=True)
-
-    def render(self, sim, distrib, goals, error):
-        def put_text(disp, txt, emph=False):
-            thick = 2 if emph else 1
-            (w, h), b = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 1, thick)
-            cv2.putText(disp, txt, (j - w // 2, i - b),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), thick)
-
-        d = distrib.get_spatial_distribution()
-        m = distrib.get_nav_mask()
-        disp = cv2.applyColorMap((d * 255 / d.max()).astype(np.uint8), cv2.COLORMAP_JET)
-        disp[~m] = 0
-        new_m = sim.pathfinder.get_topdown_view(distrib.resolution, distrib.height)
-        disp[m & ~new_m] //= 2
-        i, j = distrib.world_to_map(error.start_pos)
-        cv2.circle(disp, (j, i), 5, (0, 255, 0), 2)
-        put_text(disp, "START", False)
-        for goal in goals:
-            cat = goal.object_template_id.split('/')[-2]
-            i, j = distrib.world_to_map(np.array(goal.position))
-            cv2.circle(disp, (j, i), 5, (0, 0, 255), 2)
-
-            rot = np.quaternion(goal.rotation[3], *goal.rotation[:3])
-            bb = np.array([[goal._bounding_box.back_bottom_left,
-                            goal._bounding_box.back_bottom_right,
-                            goal._bounding_box.front_bottom_right,
-                            goal._bounding_box.front_bottom_left],
-                           [goal._bounding_box.back_top_left,
-                            goal._bounding_box.back_top_right,
-                            goal._bounding_box.front_top_right,
-                            goal._bounding_box.front_top_left]])
-            bb = np.concatenate((np.zeros((2, 4, 1)), bb), -1)
-            bb = rot * quaternion.from_float_array(bb) * rot.conjugate()
-            bb = quaternion.as_float_array(bb)[..., 1:]
-            bb = distrib.world_to_map(goal.position + bb)[..., [1, 0]]
-            cv2.polylines(disp, bb, True, (255, 0, 255))
-
-            for view_pt in goal.view_points:
-                i, j = distrib.world_to_map(view_pt.position)
-                cv2.circle(disp, (j, i), 3, (0, 255, 255), 2)
-
-            put_text(disp, cat, goal is error.goal)
-
-        time_str = time.strftime("%Y-%m-%d_%H-%M-%S")
-        cnt = 0
-        outpath = os.path.join(self.outdir, f"DEBUG_render_{time_str}_{cnt}.png")
-        while os.path.exists(outpath):
-            cnt += 1
-            outpath = os.path.join(self.outdir, f"DEBUG_render_{time_str}_{cnt}.png")
-        cv2.imwrite(outpath, disp)
-_debug = _DebugRenderer()
+_debug_map_renderer = DebugMapRenderer()
 
 
 class ObjectPoolCategory:
@@ -211,20 +156,11 @@ def spawn_objects(sim: Simulator,
 
     goals = []
     for obj_pos, obj_rot, tmpl_id in zip(positions, rotations, template_ids):
-        mngr_id, = mngr.load_configs(tmpl_id)
-        obj_id = sim.add_object(mngr_id)
-        obj_node = sim.get_object_scene_node(obj_id)
-        shift = np.array([0, obj_node.cumulative_bb.bottom, 0])
-        sim.set_translation(obj_pos - shift, obj_id)
-        sim.set_rotation(obj_rot, obj_id)
-        sim.set_object_motion_type(MotionType.STATIC, obj_id)
-
         goal = SpawnedObjectGoal(position=obj_pos.tolist(),
                                  rotation=[*obj_rot.vector, obj_rot.scalar],
                                  object_template_id=tmpl_id,
                                  view_points=[])
-        goal._spawned_object_id = obj_id
-        goal._bounding_box = obj_node.cumulative_bb
+        goal._spawn_in_sim(sim)
         goals.append(goal)
 
     _logger.debug(f"Spawned {num_objects} objects "
@@ -271,10 +207,8 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
     rel_positions = get_uniform_view_pt_positions(num_angles, num_radii, min_radius, max_radius)
     sensor_pos = np.array(sensor_cfg.POSITION)
     rel_sensor_positions = rel_positions + sensor_pos
-
     abs_sensor_rotations = get_view_pt_rotations(rel_sensor_positions)
-
-    max_y = sim.pathfinder.get_bounds()[1][1]
+    _, (_, max_y, _) = sim.pathfinder.get_bounds()
 
     for goal in goals:
         obj_pos = np.array(goal.position)
@@ -290,7 +224,7 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
         depth_with = render_view_pts(sim, cand_positions, cand_rotations)['depth']
 
         sim.set_object_motion_type(MotionType.KINEMATIC, goal._spawned_object_id)
-        sim.set_translation([0.0, 3 * max_y, 0.0], goal._spawned_object_id)
+        sim.set_translation([0.0, 2 * max_y, 0.0], goal._spawned_object_id)
         depth_without = render_view_pts(sim, cand_positions, cand_rotations)['depth']
         sim.set_translation(goal.position, goal._spawned_object_id)
         sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
@@ -334,7 +268,8 @@ def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
         check_reachability(sim, goals, start_pos)
         goals = find_view_points(sim, goals, start_pos)
     except UnreachableGoalError as e:
-        _debug.render(sim, distrib, goals, e)
+        if _logger.isEnabledFor(logging.DEBUG):
+            _debug_map_renderer.render(sim, distrib, goals, e)
         raise
     return goals
 
@@ -346,7 +281,7 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                        rotate_objects: ObjectRotation,
                                        num_retries: int,
                                        rng: np.random.Generator) -> SpawnedObjectNavEpisode:
-    height = sim.get_agent_state().position[1]
+    _, height, _ = sim.get_agent_state().position
     start_pos = sim.sample_navigable_point()
     while abs(start_pos[1] - height) > 0.05:
         start_pos = sim.sample_navigable_point()

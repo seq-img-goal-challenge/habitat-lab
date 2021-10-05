@@ -19,6 +19,7 @@ from habitat.datasets.spawned_objectnav.utils import get_random_view_pt_position
                                                      render_view_pts
 from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType
+from habitat_sim.attributes_managers import ObjectAttributesManager
 
 
 @attr.s(auto_attribs=True, kw_only=True)
@@ -37,7 +38,7 @@ class SpawnedObjectGoal(NavigationGoal):
     view_points: List[ViewPoint] = attr.ib(default=None, validator=not_none_validator)
     object_template_id: str
     _spawned_object_id: Optional[int] = attr.ib(init=False, default=None)
-    _bounding_box: Optional[mn.Range3D] = attr.ib(init=False, default=None)
+    _rotated_bb: Optional[np.ndarray] = attr.ib(init=False, default=None)
 
     def __getstate__(self):
         return {k: v for k, v in vars(self).items() if not k.startswith('_')}
@@ -45,20 +46,34 @@ class SpawnedObjectGoal(NavigationGoal):
     def __setstate__(self, state):
         self.__dict__.update(state)
         self._spawned_object_id = None
-        self._bounding_box = None
+        self._rotated_bb = None
+
+    def _spawn_in_sim(self, sim: Simulator,
+                            mngr_id: Optional[str]=None) -> None:
+        if mngr_id is None:
+            mngr = sim.get_object_template_manager()
+            mngr_id, = mngr.load_configs(self.object_template_id)
+        self._spawned_object_id = sim.add_object(mngr_id)
+        node = sim.get_object_scene_node(self._spawned_object_id)
+        self._set_bb(node.cumulative_bb)
+        shift = -self._rotated_bb[:, 1].min()
+        sim.set_translation(self.position + np.array([0, shift, 0]), self._spawned_object_id)
+        sim.set_rotation(mn.Quaternion(self.rotation[:3], self.rotation[3]),
+                         self._spawned_object_id)
+        sim.set_object_motion_type(MotionType.STATIC, self._spawned_object_id)
+
+    def _set_bb(self, bb: mn.Range3D) -> None:
+        rot = np.quaternion(self.rotation[3], *self.rotation[:3])
+        bb_pts = np.array([bb.back_bottom_left, bb.back_bottom_right,
+                           bb.front_bottom_right, bb.front_bottom_left,
+                           bb.back_top_left, bb.back_top_right,
+                           bb.front_top_right, bb.front_top_left])
+        bb_q = quaternion.from_float_array(np.concatenate((np.zeros((8, 1)), bb_pts), -1))
+        self._rotated_bb = quaternion.as_float_array(rot * bb_q * rot.conj())[:, 1:]
 
     @property
     def pathfinder_targets(self) -> List[List[float]]:
-        x, y, z = self.position
-        return [[x + dx, y + dy, z + dz]
-                for dx, dy, dz in (self._bounding_box.back_bottom_left,
-                                   self._bounding_box.back_bottom_right,
-                                   self._bounding_box.back_top_left,
-                                   self._bounding_box.back_top_right,
-                                   self._bounding_box.front_bottom_left,
-                                   self._bounding_box.front_bottom_right,
-                                   self._bounding_box.front_top_left,
-                                   self._bounding_box.front_top_right)]
+        return (self.position + self._rotated_bb).tolist()
 
 
 @attr.s(auto_attribs=True, kw_only=True)
@@ -77,7 +92,7 @@ class SpawnedObjectNavEpisode(Episode):
 
 @registry.register_task(name="SpawnedObjectNav-v0")
 class SpawnedObjectNavTask(NavigationTask):
-    _template_manager: "ObjectAttributesManager" # from habitat_sim bindings...
+    _template_manager: ObjectAttributesManager
     _loaded_object_templates: Dict[str, int] # to avoid relying on tmpl_mngr object handles...
     is_stop_called: bool
 
@@ -106,14 +121,7 @@ class SpawnedObjectNavTask(NavigationTask):
     def _spawn_objects(self, episode: SpawnedObjectNavEpisode) -> None:
         for goal in episode.goals:
             mngr_id = self._loaded_object_templates[goal.object_template_id]
-            goal._spawned_object_id = self._sim.add_object(mngr_id)
-            node = self._sim.get_object_scene_node(goal._spawned_object_id)
-            goal._bounding_box = node.cumulative_bb
-            shift = np.array([0, goal._bounding_box.bottom, 0])
-            self._sim.set_translation(goal.position - shift, goal._spawned_object_id)
-            self._sim.set_rotation(mn.Quaternion(goal.rotation[:3], goal.rotation[3]),
-                                   goal._spawned_object_id)
-            self._sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
+            goal._spawn_in_sim(self._sim, mngr_id)
 
     def _recompute_navmesh_for_static_objects(self):
         settings = NavMeshSettings()
@@ -184,7 +192,7 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
             except KeyError as e:
                 raise RuntimeError(f"Could not find sensor {config.SENSOR_UUID} "
                                    + "in simulator sensor suite.") from e
-        max_y = sim.pathfinder.get_bounds()[1][1]
+        _, (_, max_y, _) = sim.pathfinder.get_bounds()
         self._oob_pos = np.array([0.0, 2 * max_y, 0.0])
         self._cached_ep_id = None
         self._cached_appearance = None

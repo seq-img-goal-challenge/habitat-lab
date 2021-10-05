@@ -1,8 +1,9 @@
 from typing import Optional, Tuple, Dict
-import os.path
+import os
 
 import numpy as np
 import quaternion
+import cv2
 
 import habitat
 from habitat.sims.habitat_simulator.habitat_simulator import HabitatSim
@@ -90,21 +91,28 @@ def get_random_view_pt_positions(num_pts: int,
     return rel_pos
 
 
-def get_view_pt_rotations(rel_pos: np.ndarray) -> np.ndarray:
+def get_view_pt_pans(rel_pos: np.ndarray) -> np.ndarray:
     num_pts = rel_pos.shape[0]
     pan = np.arctan2(rel_pos[:, 0], rel_pos[:, 2])
     pan_q = np.zeros((num_pts, 4))
     pan_q[:, 0] = np.cos(0.5 * pan)
     pan_q[:, 2] = np.sin(0.5 * pan)
-    pan_q = quaternion.from_float_array(pan_q)
+    return quaternion.from_float_array(pan_q)
 
+
+def get_view_pt_tilts(rel_pos: np.ndarray) -> np.ndarray:
+    num_pts = rel_pos.shape[0]
     hypot = np.hypot(rel_pos[:, 0], rel_pos[:, 2])
     tilt = np.arctan(-rel_pos[:, 1] / hypot)
     tilt_q = np.zeros((num_pts, 4))
     tilt_q[:, 0] = np.cos(0.5 * tilt)
     tilt_q[:, 1] = np.sin(0.5 * tilt)
-    tilt_q = quaternion.from_float_array(tilt_q)
+    return quaternion.from_float_array(tilt_q)
 
+
+def get_view_pt_rotations(rel_pos: np.ndarray) -> np.ndarray:
+    pan_q = get_view_pt_pans(rel_pos)
+    tilt_q = get_view_pt_tilts(rel_pos)
     return pan_q * tilt_q
 
 
@@ -124,3 +132,50 @@ def render_view_pts(sim: HabitatSim, abs_pos: np.ndarray, abs_rot: np.ndarray) \
             observations[uuid].append(obs[uuid])
     sim.get_agent(0).set_state(prv_s, False, False)
     return {uuid: np.stack(obs, 0) for uuid, obs in observations.items()}
+
+
+class DebugMapRenderer:
+    def __init__(self, outdir="out/spawned_objectnav_generator_debug/"):
+        self.outdir = outdir
+        self.create_outdir = True
+
+    @staticmethod
+    def put_text(disp, txt, emph=False):
+        thick = 2 if emph else 1
+        (w, h), b = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, 1, thick)
+        cv2.putText(disp, txt, (j - w // 2, i - b),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), thick)
+
+    def render(self, sim, distrib, goals, error):
+        if self.create_outdir:
+            os.makedirs(self.outdir, exist_ok=True)
+            self.create_outdir = False
+        d = distrib.get_spatial_distribution()
+        m = distrib.get_nav_mask()
+        disp = cv2.applyColorMap((d * 255 / d.max()).astype(np.uint8), cv2.COLORMAP_JET)
+        disp[~m] = 0
+        new_m = sim.pathfinder.get_topdown_view(distrib.resolution, distrib.height)
+        disp[m & ~new_m] //= 2
+        i, j = distrib.world_to_map(error.start_pos)
+        cv2.circle(disp, (j, i), 5, (0, 255, 0), 2)
+        put_text(disp, "START", False)
+        for goal in goals:
+            cat = goal.object_template_id.split('/')[-2]
+            i, j = distrib.world_to_map(np.array(goal.position))
+            cv2.circle(disp, (j, i), 5, (0, 0, 255), 2)
+            bb = distrib.world_to_map(np.array(goal.pathfinder_targets))[..., [1, 0]]
+            cv2.polylines(disp, bb.reshape(2, 4, 2), True, (255, 0, 255))
+
+            for view_pt in goal.view_points:
+                i, j = distrib.world_to_map(view_pt.position)
+                cv2.circle(disp, (j, i), 3, (0, 255, 255), 2)
+
+            put_text(disp, cat, goal is error.goal)
+
+        time_str = time.strftime("%Y-%m-%d_%H-%M-%S")
+        cnt = 0
+        outpath = os.path.join(self.outdir, f"DEBUG_render_{time_str}_{cnt}.png")
+        while os.path.exists(outpath):
+            cnt += 1
+            outpath = os.path.join(self.outdir, f"DEBUG_render_{time_str}_{cnt}.png")
+        cv2.imwrite(outpath, disp)

@@ -397,7 +397,7 @@ def test_spawn_objects_free_rot():
             assert np.isclose(np.linalg.norm(goal.rotation), 1)
 
             node = sim.get_object_scene_node(goal._spawned_object_id)
-            assert np.allclose(node.translation, np.array(goal.position) - [0, node.cumulative_bb.bottom, 0])
+            assert np.allclose(node.translation, np.array(goal.position) - [0, goal._rotated_bb[:, 1].min(), 0])
             assert np.allclose([*node.rotation.vector, node.rotation.scalar], goal.rotation)
 
 
