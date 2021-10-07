@@ -126,7 +126,7 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
                 if seed is not None:
                     sim.seed(seed + k)
                 idx = 0
-                while idx < num_ep_per_scene + (1 if k < more_ep else 0):
+                for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                     try:
                         episode = generate_sequential_objectnav_episode(
                                 sim, f"{scene_name}_{idx0 + idx}", min_seq_len, max_seq_len,

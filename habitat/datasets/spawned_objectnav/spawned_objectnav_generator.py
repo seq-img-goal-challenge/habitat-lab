@@ -353,7 +353,7 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
                 if seed is not None:
                     sim.seed(seed + k)
                 idx = 0
-                while idx < num_ep_per_scene + (1 if k < more_ep else 0):
+                for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                     try:
                         episode = generate_spawned_objectnav_episode(
                                 sim, f"{scene_name}_{idx0 + idx}", max_goals,
