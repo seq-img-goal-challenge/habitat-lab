@@ -125,16 +125,18 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
             with habitat.sims.make_sim(cfg.SIMULATOR.TYPE, config=cfg.SIMULATOR) as sim:
                 if seed is not None:
                     sim.seed(seed + k)
-                for idx in range(num_ep_per_scene + (1 if k < more_ep else 0)):
+                idx = 0
+                while idx < num_ep_per_scene + (1 if k < more_ep else 0):
                     try:
                         episode = generate_sequential_objectnav_episode(
                                 sim, f"{scene_name}_{idx0 + idx}", min_seq_len, max_seq_len,
                                 max_goals, object_pool, rotate_objects, num_retries, rng
                         )
                         new_episodes.append(episode)
+                        idx += 1
+                        progress.update()
                     except MaxRetriesError as e:
                         _logger.error(e)
-                    progress.update()
     dataset.episodes.extend(new_episodes)
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     with gzip.open(out_path, 'wt') as f:
