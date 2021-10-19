@@ -18,8 +18,7 @@ import tqdm
 import habitat
 from habitat.config.default import Config
 from habitat.core.simulator import Simulator
-from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, ViewPoint, \
-                                                SpawnedObjectNavEpisode
+from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, SpawnedObjectNavEpisode
 from habitat.datasets.spawned_objectnav.spawned_objectnav_dataset \
         import SpawnedObjectNavDatasetV0
 from habitat.datasets.spawned_objectnav.spawn_pos_distrib import SpawnPositionDistribution
@@ -159,7 +158,7 @@ def spawn_objects(sim: Simulator,
         goal = SpawnedObjectGoal(position=obj_pos.tolist(),
                                  rotation=[*obj_rot.vector, obj_rot.scalar],
                                  object_template_id=tmpl_id,
-                                 view_points=[])
+                                 valid_view_points_indices=[])
         goal._spawn_in_sim(sim)
         goals.append(goal)
 
@@ -190,9 +189,7 @@ def check_reachability(sim: Simulator, goals: List[SpawnedObjectGoal],
 
 
 def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: np.ndarray,
-                     num_angles: int=20, num_radii: int=10,
-                     min_radius: float=0.5, max_radius: float=3.5,
-                     roi: Optional[Tuple[slice, slice]]=None,
+                     view_pts_cfg: Config, roi: Optional[Tuple[slice, slice]]=None,
                      iou_thresh: Optional[float]=None) -> List[SpawnedObjectGoal]:
     sensor_cfg = sim.habitat_config.DEPTH_SENSOR
     if roi is None:
@@ -204,7 +201,8 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
     else:
         roi_vert, roi_horz = roi
 
-    rel_positions = get_uniform_view_pt_positions(num_angles, num_radii, min_radius, max_radius)
+    rel_positions = get_uniform_view_pt_positions(**{key.lower(): val
+                                                     for key, val in view_pts_cfg.items()})
     sensor_pos = np.array(sensor_cfg.POSITION)
     rel_sensor_positions = rel_positions + sensor_pos
     abs_sensor_rotations = get_view_pt_rotations(rel_sensor_positions)
@@ -235,14 +233,11 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
         scores = diff_roi.sum(axis=(1, 2)) / diff_roi[0].size
         visible = diff.any(axis=(1, 2)) if iou_thresh is None else scores >= iou_thresh
 
-        goal.view_points = [ViewPoint(position=pos.tolist(),
-                                      rotation=[rot.x, rot.y, rot.z, rot.w],
-                                      iou=iou)
-                            for pos, rot, iou in zip(cand_positions[visible],
-                                                     cand_rotations[visible],
-                                                     scores[visible])]
-        if not goal.view_points:
+        cand_indices, = np.nonzero(reachable)
+        goal.valid_view_points_indices = cand_indices[visible].astype(np.uint8)
+        if not goal.valid_view_points_indices:
             raise UnreachableGoalError(goal, start_pos)
+        goal.valid_view_points_iou = scores[visible].astype(np.float32)
     _logger.debug(f"All {len(goals)} goals have at least one view point.")
     return goals
 
@@ -258,6 +253,7 @@ def clear_sim_from_objects(sim):
 
 def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
                                  template_ids: List[str], rotate_objects: ObjectRotation,
+                                 view_pts_cfg: Config,
                                  rng: np.random.Generator) -> List[SpawnedObjectGoal]:
     clear_sim_from_objects(sim)
     distrib = SpawnPositionDistribution(sim, height=start_pos[1])
@@ -266,7 +262,7 @@ def generate_spawned_objectgoals(sim: Simulator, start_pos: np.ndarray,
     recompute_navmesh_with_static_objects(sim)
     try:
         check_reachability(sim, goals, start_pos)
-        goals = find_view_points(sim, goals, start_pos)
+        goals = find_view_points(sim, goals, start_pos, view_pts_cfg)
     except UnreachableGoalError as e:
         if _logger.isEnabledFor(logging.DEBUG):
             _debug_map_renderer.render(sim, distrib, goals, e)
@@ -279,12 +275,10 @@ def generate_spawned_objectnav_episode(sim: Simulator,
                                        max_goals: int,
                                        object_pool: List[ObjectPoolCategory],
                                        rotate_objects: ObjectRotation,
+                                       view_pts_cfg: Config,
                                        num_retries: int,
                                        rng: np.random.Generator) -> SpawnedObjectNavEpisode:
-    _, height, _ = sim.get_agent_state().position
     start_pos = sim.sample_navigable_point()
-    while abs(start_pos[1] - height) > 0.05:
-        start_pos = sim.sample_navigable_point()
     a = 2 * np.pi * rng.random()
     start_rot = [*(np.sin(0.5 * a) * sim.up_vector), np.cos(0.5 * a)]
 
@@ -294,7 +288,8 @@ def generate_spawned_objectnav_episode(sim: Simulator,
     errors = []
     for _ in range(num_retries):
         try:
-            goals = generate_spawned_objectgoals(sim, start_pos, tmpl_ids, rotate_objects, rng)
+            goals = generate_spawned_objectgoals(sim, start_pos, tmpl_ids, rotate_objects,
+                                                 view_pts_cfg, rng)
             break
         except UnreachableGoalError as e:
             errors.append(e)
@@ -312,12 +307,7 @@ def generate_spawned_objectnav_episode(sim: Simulator,
     return episode
 
 
-def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir: str,
-                                       num_episodes:int, max_goals: int,
-                                       rotate_objects: ObjectRotation,
-                                       if_exist: ExistBehavior, num_retries: int,
-                                       seed: Optional[int]=None, verbose: int=0,
-                                       **kwargs) -> SpawnedObjectNavDatasetV0:
+def check_existence(cfg: Config, if_exist: ExistBehavior):
     out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
     idx0 = 0
     try:
@@ -334,12 +324,27 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
     except FileNotFoundError:
         _logger.info(f"Creating new dataset '{out_path}'.")
         dataset = habitat.make_dataset(cfg.DATASET.TYPE)
+    return out_path, dataset, idx0
+
+
+def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir: str,
+                                       num_episodes:int, max_goals: int,
+                                       rotate_objects: ObjectRotation,
+                                       if_exist: ExistBehavior, num_retries: int,
+                                       seed: Optional[int]=None, verbose: int=0,
+                                       **kwargs) -> SpawnedObjectNavDatasetV0:
+    out_path, dataset, idx0 = check_existence(cfg, if_exist)
     new_episodes = []
     rng = np.random.default_rng(seed)
     scene_pool = create_scene_pool(scenes_dir)
     rng.shuffle(scene_pool)
     object_pool = create_object_pool(objects_dir)
     rng.shuffle(object_pool)
+    view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.VIEW_POINTS
+    if view_pts_cfg.NUM_ANGLES * view_pts_cfg.NUM_RADII > 256:
+        raise ValueError("Too many potential view points around a single goal (max = 256); "
+                         "please update your view points config")
+
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
     with tqdm.tqdm(total=num_episodes, disable=(verbose!=1)) as progress:
         for k, scene in enumerate(scene_pool):
@@ -357,7 +362,7 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
                     try:
                         episode = generate_spawned_objectnav_episode(
                                 sim, f"{scene_name}_{idx0 + idx}", max_goals,
-                                object_pool, rotate_objects, num_retries, rng
+                                object_pool, rotate_objects, view_pts_cfg, num_retries, rng
                         )
                         new_episodes.append(episode)
                         idx += 1

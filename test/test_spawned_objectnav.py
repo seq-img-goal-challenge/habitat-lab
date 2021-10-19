@@ -328,7 +328,7 @@ def test_spawn_objects_fixed_rot():
             assert np.allclose(goal.position, pos)
             assert goal.rotation == [0, 0, 0, 1]
             assert goal.object_template_id == tmpl_id
-            assert goal.view_points == []
+            assert goal.valid_view_points_indices == []
             assert goal.radius is None
             assert goal._spawned_object_id is not None
 
@@ -445,6 +445,12 @@ def test_find_view_points():
     if not os.path.isdir(OBJECTS_DIR):
         pytest.skip(f"Test objects '{OBJECTS_DIR}' not available.")
 
+    a = np.linspace(0, 2 * np.pi, NUM_ANGLES)
+    r = np.linspace(0.5, 3.5, NUM_RADII, endpoint=True)
+    rel_pos = np.zeros((NUM_ANGLES * NUM_RADII, 3), dtype=np.float32)
+    rel_pos[:, 0] = np.outer(r, np.cos(a)).flatten()
+    rel_pos[:, 2] = np.outer(r, np.sin(a)).flatten()
+
     with habitat.sims.make_sim(sim_cfg.TYPE, config=sim_cfg) as sim:
         sim.seed(123456)
         template_ids = [os.path.join(OBJECTS_DIR, tmpl, tmpl + OBJECT_EXT)
@@ -460,6 +466,7 @@ def test_find_view_points():
         goals = find_view_points(sim, src_goals, start_pos,
                                  num_angles=NUM_ANGLES, num_radii=NUM_RADII)
         sensor_pos = np.array(sim.habitat_config.DEPTH_SENSOR.POSITION)
+
         assert isinstance(goals, list)
         for goal, src_goal, cp_goal in zip(goals, src_goals, cp_goals):
             assert goal is src_goal
@@ -468,12 +475,12 @@ def test_find_view_points():
             assert np.allclose(goal.rotation, cp_goal.rotation)
             assert goal.object_template_id == cp_goal.object_template_id
             assert goal.radius is None
-            assert 0 < len(goal.view_points) <= NUM_RADII * NUM_ANGLES
-            for view_pt in goal.view_points:
-                ag_pos = view_pt.position - sensor_pos
+            assert 0 < len(goal.valid_view_points_indices) <= NUM_RADII * NUM_ANGLES
+            for idx in goal.valid_view_points_indices:
+                ag_pos = np.array(goal.position) + rel_pos[idx]
                 assert sim.pathfinder.is_navigable(ag_pos)
                 assert np.isfinite(sim.geodesic_distance(start_pos, ag_pos))
-                assert view_pt.iou > 0
+            assert all(iou > 0 for iou in goal.valid_view_points_iou)
 
 
 def test_generate_spawned_objectgoals():
@@ -485,7 +492,8 @@ def test_generate_spawned_objectgoals():
     OBJECTS_DIR = "data/object_datasets/test_objects"
     OBJECT_EXT = ".object_config.json"
 
-    sim_cfg = habitat.get_config().SIMULATOR
+    cfg = habitat.get_config()
+    sim_cfg = cfg.SIMULATOR
     sim_cfg.defrost()
     sim_cfg.AGENT_0.SENSORS = ['DEPTH_SENSOR']
     sim_cfg.freeze()
@@ -493,6 +501,14 @@ def test_generate_spawned_objectgoals():
         pytest.skip(f"Test scene '{sim_cfg.SCENE}' not available.")
     if not os.path.isdir(OBJECTS_DIR):
         pytest.skip(f"Test objects '{OBJECTS_DIR}' not available.")
+
+    view_pts_cfg = cfg.DATASET.VIEW_POINTS
+    a = np.linspace(0, 2 * np.pi, view_pts_cfg.NUM_ANGLES)
+    r = np.linspace(0.5, 3.0, view_pts_cfg.NUM_RADII, endpoint=True)
+    n_pts = view_pts_cfg.NUM_ANGLES * view_pts_cfg.NUM_RADII
+    rel_pos = np.zeros((n_pts, 3))
+    rel_pos[:, 0] = np.outer(r, np.cos(a)).flatten()
+    rel_pos[:, 2] = np.outer(r, np.sin(a)).flatten()
 
     with habitat.sims.make_sim(sim_cfg.TYPE, config=sim_cfg) as sim:
         sim.seed(123456)
@@ -502,7 +518,7 @@ def test_generate_spawned_objectgoals():
         rng = np.random.default_rng(123456)
 
         goals = generate_spawned_objectgoals(sim, start_pos, template_ids,
-                                             ObjectRotation.VERTICAL, rng)
+                                             ObjectRotation.VERTICAL, view_pts_cfg, rng)
         sensor_pos = np.array(sim.habitat_config.DEPTH_SENSOR.POSITION)
         assert isinstance(goals, list)
         for goal, tmpl_id in zip(goals, template_ids):
@@ -510,12 +526,12 @@ def test_generate_spawned_objectgoals():
             assert goal.object_template_id == tmpl_id
             assert goal.radius is None
             assert goal._spawned_object_id is not None
-            assert 0 < len(goal.view_points) <= 200
-            for view_pt in goal.view_points:
-                ag_pos = view_pt.position - sensor_pos
+            assert 0 < len(goal.valid_view_points_indices) <= n_pts
+            for idx in goal.valid_view_points_indices:
+                ag_pos = goal.position + rel_pos[idx]
                 assert sim.pathfinder.is_navigable(ag_pos)
                 assert np.isfinite(sim.geodesic_distance(start_pos, ag_pos))
-                assert view_pt.iou > 0
+            assert all(iou > 0 for iou in goal.valid_view_points_iou)
 
 
 def test_generate_episode():
@@ -528,7 +544,8 @@ def test_generate_episode():
     MAX_GOALS = 2
     NUM_RETRIES = 2
 
-    sim_cfg = habitat.get_config().SIMULATOR
+    cfg = habitat.get_config()
+    sim_cfg = cfg.SIMULATOR
     sim_cfg.defrost()
     sim_cfg.AGENT_0.SENSORS = ['DEPTH_SENSOR']
     sim_cfg.freeze()
@@ -537,13 +554,16 @@ def test_generate_episode():
     if not os.path.isdir(OBJECTS_DIR):
         pytest.skip(f"Test objects '{OBJECTS_DIR}' not available.")
 
+    view_pts_cfg = cfg.DATASET.VIEW_POINTS
+
     with habitat.sims.make_sim(sim_cfg.TYPE, config=sim_cfg) as sim:
         sim.seed(123456)
 
         obj_pool = create_object_pool(OBJECTS_DIR)
         rng = np.random.default_rng(123456)
         episode = generate_spawned_objectnav_episode(sim, "ep0", MAX_GOALS, obj_pool,
-                                                     ObjectRotation.FIXED, NUM_RETRIES, rng)
+                                                     ObjectRotation.FIXED, view_pts_cfg,
+                                                     NUM_RETRIES, rng)
         lower, upper = sim.pathfinder.get_bounds()
         assert isinstance(episode, SpawnedObjectNavEpisode)
         assert episode.episode_id == "ep0"
@@ -605,7 +625,7 @@ def test_generate_dataset():
             assert goal.object_template_id.endswith(OBJECT_EXT)
             assert os.path.isfile(goal.object_template_id)
             assert goal._spawned_object_id is None
-            assert 0 < len(goal.view_points) <= 200
+            assert 0 < len(goal.valid_view_points_indices) <= 200
 
 
 def test_task():

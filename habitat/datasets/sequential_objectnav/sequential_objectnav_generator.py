@@ -11,10 +11,11 @@ import tqdm
 import habitat
 from habitat.config.default import Config
 from habitat.core.simulator import Simulator
-from habitat.datasets.spawned_objectnav.spawned_objectnav_generator \
-        import DEFAULT_SCENE_PATH_EXT, ObjectPoolCategory, ObjectRotation, ExistBehavior, \
-               UnreachableGoalError, MaxRetriesError, \
-               create_object_pool, create_scene_pool, generate_spawned_objectgoals
+from habitat.datasets.spawned_objectnav.spawned_objectnav_generator import (
+    DEFAULT_SCENE_PATH_EXT, ObjectPoolCategory, ObjectRotation, ExistBehavior, \
+    UnreachableGoalError, MaxRetriesError, create_object_pool, create_scene_pool,
+    generate_spawned_objectgoals, check_existence
+)
 from habitat.datasets.sequential_objectnav.sequential_objectnav_dataset \
         import SequentialObjectNavDatasetV0
 from habitat.tasks.sequential_nav.sequential_objectnav import SequentialObjectNavStep, \
@@ -35,13 +36,11 @@ def generate_sequential_objectnav_episode(sim: Simulator,
                                           max_goals: int,
                                           object_pool: List[ObjectPoolCategory],
                                           rotate_objects: ObjectRotation,
+                                          view_pts_cfg: Config,
                                           num_retries: int,
                                           rng: np.random.Generator) \
                                          -> SequentialObjectNavEpisode:
-    height = sim.get_agent_state().position[1]
     start_pos = sim.sample_navigable_point()
-    while abs(start_pos[1] - height) > 0.05:
-        start_pos = sim.sample_navigable_point()
     a = 2 * np.pi * rng.random()
     start_rot = [*(np.sin(0.5 * a) * sim.up_vector), np.cos(0.5 * a)]
 
@@ -64,7 +63,7 @@ def generate_sequential_objectnav_episode(sim: Simulator,
     for retry in range(num_retries):
         try:
             goals = generate_spawned_objectgoals(sim, start_pos, all_tmpl_ids,
-                                                 rotate_objects, rng)
+                                                 rotate_objects, view_pts_cfg, rng)
             break
         except UnreachableGoalError as e:
             errors.append(e)
@@ -90,29 +89,19 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
                                           max_goals: int, rotate_objects: ObjectRotation,
                                           if_exist: ExistBehavior, num_retries: int,
                                           seed: Optional[int]=None, verbose: int=0,
-                                          **kwargs) -> SequentialObjectNavDatasetV0:
-    out_path = cfg.DATASET.DATA_PATH.format(split=cfg.DATASET.SPLIT)
-    idx0 = 0
-    try:
-        dataset = habitat.make_dataset(cfg.DATASET.TYPE, config=cfg.DATASET)
-        if if_exist is ExistBehavior.ABORT:
-            _logger.error(f"'{out_path}' already exists, aborting")
-            return
-        elif if_exist is ExistBehavior.OVERRIDE:
-            _logger.warning(f"Overriding '{out_path}'.")
-            dataset.episodes = []
-        elif if_exist is ExistBehavior.APPEND:
-            idx0 = len(dataset.episodes)
-            _logger.info(f"Appending episodes to '{out_path}'.")
-    except FileNotFoundError:
-        _logger.info(f"Creating new dataset '{out_path}'.")
-        dataset = habitat.make_dataset(cfg.DATASET.TYPE)
+                                          **kwargs: Any) -> SequentialObjectNavDatasetV0:
+    out_path, dataset, idx0 = check_existence(cfg, if_exist)
     new_episodes = []
     rng = np.random.default_rng(seed)
     scene_pool = create_scene_pool(scenes_dir)
     rng.shuffle(scene_pool)
     object_pool = create_object_pool(objects_dir)
     rng.shuffle(object_pool)
+    view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.VIEW_POINTS
+    if view_pts_cfg.NUM_ANGLES * view_pts_cfg.NUM_RADII > 256:
+        raise ValueError("Too many potential view points around a single goal (max = 256); "
+                         "please update your view points config")
+
     num_ep_per_scene, more_ep = divmod(num_episodes, len(scene_pool))
     with tqdm.tqdm(total=num_episodes, disable=(verbose != 1)) as progress:
         for k, scene in enumerate(scene_pool):
@@ -130,7 +119,8 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
                     try:
                         episode = generate_sequential_objectnav_episode(
                                 sim, f"{scene_name}_{idx0 + idx}", min_seq_len, max_seq_len,
-                                max_goals, object_pool, rotate_objects, num_retries, rng
+                                max_goals, object_pool, rotate_objects,
+                                view_pts_cfg, num_retries, rng
                         )
                         new_episodes.append(episode)
                         idx += 1
