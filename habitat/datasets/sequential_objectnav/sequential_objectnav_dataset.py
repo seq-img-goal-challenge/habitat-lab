@@ -6,6 +6,7 @@ import gzip
 import json
 import random
 
+from habitat.config.default import Config
 from habitat.core.dataset import EpisodeIterator
 from habitat.core.logging import logger
 from habitat.core.registry import registry
@@ -13,8 +14,8 @@ from habitat.datasets.spawned_objectnav.spawned_objectnav_dataset import (
         SpawnedObjectNavDatasetV0,
 )
 from habitat.datasets.spawned_objectnav.utils import (DEFAULT_SCENE_PATH_PREFIX,
-                                                      DEFAULT_SCENE_PATH_EXT)
-from habitat.datasets.spawned_objectnav.utils import find_scene_file
+                                                      DEFAULT_SCENE_PATH_EXT,
+                                                      find_scene_file)
 from habitat.tasks.nav.spawned_objectnav import ViewPoint, SpawnedObjectGoal
 from habitat.tasks.sequential_nav.sequential_nav import SequentialDataset
 from habitat.tasks.sequential_nav.sequential_objectnav import (SequentialObjectNavStep,
@@ -27,6 +28,7 @@ ALL_SCENES_SELECTOR = "*"
 
 @registry.register_dataset(name="SequentialObjectNav-v0")
 class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset):
+    config: Optional[Config] = None
     _loaded_episodes: List[SequentialObjectNavEpisode]
     _scene_content_paths: Optional[List[str]] = None
     _load_next: Optional[threading.Semaphore] = None
@@ -38,7 +40,7 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset)
         self._loaded_episodes = []
         if config is None:
             return
-
+        self.config = config
         data_path = config.DATA_PATH.format(split=config.SPLIT)
         content_path = os.path.join(os.path.dirname(data_path), CONTENT_DIR)
         use_all_scenes = ALL_SCENES_SELECTOR in config.CONTENT_SCENES
@@ -55,26 +57,32 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset)
             self._load_thread.start()
         else:
             with gzip.open(data_path, 'rt') as f:
-                self.from_json(json.load(f))
+                self.from_json(f.read())
 
     def __del__(self):
-        self._exit_thread = True
-        self._load_next.release()
-        self._load_thread.join()
+        if self._scene_content_paths:
+            self._exit_thread = True
+            self._load_next.release()
+            self._load_thread.join()
 
     def _load_func(self):
         load_cycle = itertools.cycle(self._scene_content_paths)
+        logger.info("(loader) Data loading thread started")
         while True:
-            self._load_next.aquire()
+            self._load_next.acquire()
             if self._exit_thread:
                 break
             path = next(load_cycle)
+            logger.info(f"(loader) Loading next scene from '{path}'")
             self._loaded_episodes = []
             with gzip.open(path) as f:
-                self.from_json(json.load(f))
+                self.from_json(f.read())
+            logger.info(f"(loader) Scene loaded from '{path}'")
             self._next_avail.release()
+        logger.info("(loader) Data loading thread ended")
 
     def _count_episodes_in_scenes(self):
+        logger.info("Counting total number of episodes in all selected scenes")
         cnt = 0
         for path in self._scene_content_paths:
             with gzip.open(path, 'rt') as f:
@@ -90,17 +98,20 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset)
             return self._num_episodes
 
     @property
-    def episodes(self) -> List[Optional[SequentialObjectNavEpisode]]:
+    def episodes(self) -> List[SequentialObjectNavEpisode]:
         if self._scene_content_paths is None:
             return self._loaded_episodes
         else:
-            logger.warning("Returning a dummy list of None for dataset.episodes... "
-                           + "Please use get_episode_iterator() or num_episodes instead!")
-            return [None for _ in range(self._num_episodes)] 
+            self._next_avail.acquire()
+            dummy = [self._loaded_episodes[0] for _ in range(self._num_episodes)] 
+            self._next_avail.release()
+            logger.warning("Returning a dummy list filled with first episode as 'dataset.episodes'... "
+                           + "Please use 'get_episode_iterator()' or 'num_episodes' instead!")
+            return dummy
 
     def get_episode_iterator(self, *args: Any, **kwargs: Any) -> EpisodeIterator:
         if self._scene_content_paths is None:
-            return super().get_episode_iterator()
+            return super().get_episode_iterator(*args, **kwargs)
         else:
             return SequentialObjectNavEpisodeIterator(self, *args, **kwargs)
 
@@ -143,7 +154,7 @@ class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset)
         self._loaded_episodes.extend(deserialized["episodes"])
 
 
-def SequentialObjectNavEpisodeIterator(EpisodeIterator):
+class SequentialObjectNavEpisodeIterator(EpisodeIterator):
     dataset: SequentialObjectNavDatasetV0
     _cumul_episodes: int
 
