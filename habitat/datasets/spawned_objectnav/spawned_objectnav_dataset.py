@@ -11,12 +11,11 @@ from habitat.datasets.spawned_objectnav.utils import (find_scene_file,
                                                       find_object_config_file,
                                                       strip_scene_id,
                                                       strip_object_template_id)
-from habitat.tasks.nav.spawned_objectnav import ViewPoint, SpawnedObjectGoal, \
-                                                SpawnedObjectNavEpisode
-
+from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, SpawnedObjectNavEpisode
 
 @registry.register_dataset(name="SpawnedObjectNav-v0")
 class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
+    config: Config
     episodes: List[SpawnedObjectNavEpisode]
     _scn_prefix: Optional[str] = None
     _scn_ext: Optional[str] = None
@@ -42,7 +41,7 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
         return max(episode.object_category_index
                    for episode in self.episodes)
 
-    def _json_hook(self, raw_dict):
+    def _json_hook(self, raw_dict: Dict[str, Any]) -> Any:
         if "episode_id" in raw_dict:
             if self._scn_prefix is None:
                 scenes_dir = None if self.config is None else self.config.SCENES_DIR
@@ -63,9 +62,11 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
                 obj_tmpl_id = os.path.join(self._obj_prefix,
                                            raw_dict["object_template_id"] + self._obj_ext)
             raw_dict["object_template_id"] = obj_tmpl_id
+            view_pts_indices = np.array(raw_dict["valid_view_points_indices"])
+            raw_dict["valid_view_points_indices"] = view_pts_indices.astype(np.uint8)
+            view_pts_ious = np.array(raw_dict["valid_view_points_ious"])
+            raw_dict["valid_view_points_ious"] = view_pts_ious.astype(np.float32)
             return SpawnedObjectGoal(**raw_dict)
-        elif "iou" in raw_dict:
-            return ViewPoint(**raw_dict)
         else:
             return raw_dict
 
@@ -73,7 +74,7 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
         deserialized = json.loads(json_str, object_hook=self._json_hook)
         self.episodes.extend(deserialized["episodes"])
 
-    def _json_default(self, obj: object) -> Dict[str, Any]:
+    def _json_default(self, obj: Any) -> Dict[str, Any]:
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         s = obj.__getstate__() if hasattr(obj, "__getstate__") else obj.__dict__

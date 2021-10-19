@@ -14,7 +14,7 @@ from habitat.core.registry import registry
 from habitat.core.utils import not_none_validator
 from habitat.config import Config
 from habitat.tasks.nav.nav import NavigationGoal, NavigationTask, DistanceToGoal
-from habitat.datasets.spawned_objectnav.utils import get_random_view_pt_positions, \
+from habitat.datasets.spawned_objectnav.utils import get_uniform_view_pt_positions, \
                                                      get_view_pt_rotations, \
                                                      render_view_pts
 from habitat_sim.nav import NavMeshSettings
@@ -23,20 +23,14 @@ from habitat_sim.attributes_managers import ObjectAttributesManager
 
 
 @attr.s(auto_attribs=True, kw_only=True)
-class ViewPoint:
-    position: List[float] = attr.ib(default=None, validator=not_none_validator)
-    rotation: List[float] = attr.ib(default=None, validator=not_none_validator)
-    iou: Optional[float] = None
-
-
-@attr.s(auto_attribs=True, kw_only=True)
 class SpawnedObjectGoal(NavigationGoal):
     # Inherited
     # position: List[float]
     # radius: Optional[float]
     rotation: List[float] = attr.ib(default=None, validator=not_none_validator)
-    view_points: List[ViewPoint] = attr.ib(default=None, validator=not_none_validator)
     object_template_id: str
+    valid_view_points_indices: np.ndarray = attr.ib(default=None, validator=not_none_validator)
+    valid_view_points_ious: Optional[np.ndarray] = None
     _spawned_object_id: Optional[int] = attr.ib(init=False, default=None)
     _rotated_bb: Optional[np.ndarray] = attr.ib(init=False, default=None)
 
@@ -170,10 +164,13 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
     _sim: Simulator
     _sim_sensor: Sensor
     _oob_pos: np.ndarray
+    _view_pts_rel_positions: np.ndarray
+    _view_pts_rotations: np.ndarray
     _cached_ep_id: Optional[str]
     _cached_appearance: Optional[np.ndarray]
 
-    def __init__(self, config: Config, sim: Simulator, *args, **kwargs) -> None:
+    def __init__(self, config: Config, sim: Simulator, task: SpawnedObjectNavTask,
+                       *args: Any, **kwargs: Any) -> None:
         self._sim = sim
         if config.SENSOR_UUID is None:
             try:
@@ -194,6 +191,12 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
                                    + "in simulator sensor suite.") from e
         _, (_, max_y, _) = sim.pathfinder.get_bounds()
         self._oob_pos = np.array([0.0, 2 * max_y, 0.0])
+        self._view_pts_rel_positions = get_uniform_view_pt_positions(
+            config.VIEW_POINTS.NUM_ANGLES, config.VIEW_POINTS.NUM_RADII,
+            config.VIEW_POINTS.MIN_RADIUS, config.VIEW_POINTS.MAX_RADIUS
+        )
+        self._view_pts_rel_positions += np.array(self._sim_sensor.config.POSITION)
+        self._view_pts_rotations = get_view_pt_rotations(self._view_pts_rel_positions)
         self._cached_ep_id = None
         self._cached_appearance = None
         super().__init__(config=config, *args, **kwargs)
@@ -232,16 +235,15 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
     def _render_views_around_goal(self, goal: SpawnedObjectGoal, num_views: int) -> None:
         if self.config.OUT_OF_CONTEXT:
             self._move_object_out_of_context(goal)
-            rel_positions = get_random_view_pt_positions(num_views)
-            rotations = get_view_pt_rotations(rel_positions)
-            views = render_view_pts(self._sim, self._oob_pos + rel_positions, rotations)
-            self._restore_object_in_context(goal)
+            indices = np.random.permutation(self._view_pts_rel_positions.shape[0])[:num_views]
+            positions = self._oob_pos + self._view_pts_rel_positions[indices]
         else:
-            view_points = np.random.choice(goal.view_points, num_views, True)
-            positions = np.array([view_pt.position for view_pt in view_points])
-            rotations = np.array([view_pt.rotation for view_pt in view_points])
-            rotations = quaternion.from_float_array(rotations[:, [3, 0, 1, 2]])
-            views = render_view_pts(self._sim, positions, rotations)
+            indices = np.random.choice(goal.valid_view_points_indices, num_views, True)
+            positions = np.array(goal.position) + self._view_pts_rel_positions[indices]
+        rotations = self._view_pts_rotations[indices]
+        views = render_view_pts(self._sim, positions, rotations)
+        if self.config.OUT_OF_CONTEXT:
+            self._restore_object_in_context(goal)
         return views[self._sim_sensor.uuid]
 
     def get_observation(self, episode: SpawnedObjectNavEpisode,

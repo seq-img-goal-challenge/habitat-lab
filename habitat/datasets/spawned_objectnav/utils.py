@@ -58,7 +58,7 @@ def strip_scene_id(scene_id: str, scenes_dir: Optional[str]=None) -> str:
     return scene_id
 
 
-def strip_object_template_id(obj_tmpl_id, objects_dir):
+def strip_object_template_id(obj_tmpl_id, objects_dir: Optional[str]=None):
     if obj_tmpl_id.endswith(DEFAULT_OBJECT_PATH_EXT):
         obj_tmpl_id = obj_tmpl_id[:-len(DEFAULT_OBJECT_PATH_EXT)]
     candidates = ('.', DEFAULT_OBJECT_PATH_PREFIX, HABITAT_OBJECT_PATH_PREFIX)
@@ -71,8 +71,8 @@ def strip_object_template_id(obj_tmpl_id, objects_dir):
     return obj_tmpl_id
 
 
-def get_uniform_view_pt_positions(num_angles: int=12, num_radii: int=5,
-                                  min_radius: float=0.5, max_radius: float=3.0) -> np.ndarray:
+def get_uniform_view_pt_positions(num_angles: int=20, num_radii: int=10,
+                                  min_radius: float=0.5, max_radius: float=3.5) -> np.ndarray:
     angles = np.linspace(0, 2 * np.pi, num_angles)
     radii = np.linspace(min_radius, max_radius, num_radii, endpoint=True)
     rel_pos = np.zeros((num_radii * num_angles, 3), dtype=np.float32)
@@ -82,7 +82,7 @@ def get_uniform_view_pt_positions(num_angles: int=12, num_radii: int=5,
 
 
 def get_random_view_pt_positions(num_pts: int,
-                                 min_radius: float=0.5, max_radius: float=3.0) -> np.ndarray:
+                                 min_radius: float=0.5, max_radius: float=3.5) -> np.ndarray:
     angles = 2 * np.pi * np.random.random(num_pts)
     radii = (max_radius - min_radius) * np.random.random(num_pts) + min_radius
     rel_pos = np.zeros((num_pts, 3), dtype=np.float32)
