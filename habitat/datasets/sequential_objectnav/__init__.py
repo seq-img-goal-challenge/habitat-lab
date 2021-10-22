@@ -10,7 +10,7 @@ def _try_register_sequential_objectnav_dataset():
         sequential_objectnav_import_error = e
 
         @registry.register_dataset(name="SequentialObjectNav-v0")
-        class SEquentialObjectNavDatasetImportError(Dataset):
+        class SequentialObjectNavDatasetImportError(Dataset):
             def __init__(self, *args, **kwargs):
                 raise sequential_objectnav_import_error
 
