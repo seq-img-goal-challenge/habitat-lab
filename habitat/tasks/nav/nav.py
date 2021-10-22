@@ -871,7 +871,7 @@ class TopDownMap(Measure):
             self._draw_point(
                 episode.start_position, maps.MAP_SOURCE_POINT_INDICATOR
             )
-        self.update_metric(episode, None, *args, **kwargs)
+        self.update_metric(*args, episode=episode, action=None, **kwargs)
 
     def update_metric(self, episode, action, *args: Any, **kwargs: Any):
         self._step_count += 1
