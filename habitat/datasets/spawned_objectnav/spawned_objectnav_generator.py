@@ -237,7 +237,7 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
         goal.valid_view_points_indices = cand_indices[visible].astype(np.uint8)
         if not goal.valid_view_points_indices:
             raise UnreachableGoalError(goal, start_pos)
-        goal.valid_view_points_iou = scores[visible].astype(np.float32)
+        goal.valid_view_points_ious = scores[visible].astype(np.float32)
     _logger.debug(f"All {len(goals)} goals have at least one view point.")
     return goals
 
