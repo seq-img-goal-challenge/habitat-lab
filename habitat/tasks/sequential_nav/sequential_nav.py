@@ -239,6 +239,8 @@ class SequentialEgoMapSensor(Sensor):
 
 @registry.register_measure
 class SequentialTopDownMap(TopDownMap):
+    _last_step_index: int = 0
+
     def _compute_shortest_path(self, episode: SequentialEpisode,
                                      start_pos: List[float]) -> List[List[float]]:
         last = [(start_pos, 0.0, None)]
@@ -263,15 +265,15 @@ class SequentialTopDownMap(TopDownMap):
             super()._draw_goals_view_points(step)
 
     def _draw_goals_positions(self, episode: SequentialEpisode) -> None:
-        for t, step in enumerate(episode.steps):
-            if t == episode._current_step_index:
-                if self._config.DRAW_GOAL_POSITIONS:
+        if self._config.DRAW_GOAL_POSITIONS:
+            for t, step in enumerate(episode.steps):
+                if t == episode._current_step_index:
                     for goal in step.goals:
                         if self._is_on_same_floor(goal.position[1]):
                             super()._draw_point(goal.position,
                                                 maps.MAP_NEXT_TARGET_POINT_INDICATOR)
-            else:
-                super()._draw_goals_positions(step)
+                else:
+                    super()._draw_goals_positions(step)
 
     def _draw_goals_aabb(self, episode: SequentialEpisode) -> None:
         for step in episode.steps:
@@ -287,6 +289,16 @@ class SequentialTopDownMap(TopDownMap):
                                           for p in path]
             maps.draw_path(self._top_down_map, self._shortest_path_points,
                            maps.MAP_SHORTEST_PATH_COLOR, self.line_thickness)
+
+    def reset_metric(self, episode: SequentialEpisode, *args: Any, **kwargs: Any) -> None:
+        self._last_step_index = episode._current_step_index
+        super().reset_metric(*args, episode=episode, **kwargs)
+
+    def update_metric(self, episode: SequentialEpisode, *args: Any, **kwargs: Any) -> None:
+        if episode._current_step_index != self._last_step_index:
+            self._draw_goals_positions(episode)
+            self._last_step_index = episode._current_step_index
+        super().update_metric(*args, episode=episode, **kwargs)
 
 
 @registry.register_measure
