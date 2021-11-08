@@ -56,6 +56,11 @@ class SpawnedObjectGoal(NavigationGoal):
                          self._spawned_object_id)
         sim.set_object_motion_type(MotionType.STATIC, self._spawned_object_id)
 
+    def _despawn_from_sim(self, sim: Simulator) -> None:
+        self._rotated_bb = None
+        sim.remove_object(self._spawned_object_id)
+        self._spawned_object_id = None
+
     def _set_bb(self, bb: mn.Range3D) -> None:
         rot = np.quaternion(self.rotation[3], *self.rotation[:3])
         bb_pts = np.array([bb.back_bottom_left, bb.back_bottom_right,
@@ -88,18 +93,18 @@ class SpawnedObjectNavEpisode(Episode):
 class SpawnedObjectNavTask(NavigationTask):
     _template_manager: ObjectAttributesManager
     _loaded_object_templates: Dict[str, int] # to avoid relying on tmpl_mngr object handles...
-    is_stop_called: bool
+    _current_episode: Optional[SpawnedObjectNavEpisode] = None
+    is_stop_called: bool = False
 
     def __init__(self, config: Config, sim: Simulator,
                  dataset: Optional["SpawnedObjectNavDatasetV1"]=None) -> None:
         self._template_manager = sim.get_object_template_manager()
         self._loaded_object_templates = {}
-        self.is_stop_called = False
         super().__init__(config=config, sim=sim, dataset=dataset)
 
-    def _reload_templates(self, episode: SpawnedObjectNavEpisode) -> None:
+    def _reload_templates(self) -> None:
         loaded = set(self._loaded_object_templates)
-        to_load = self._dataset.get_objects_to_load(episode)
+        to_load = self._dataset.get_objects_to_load(self._current_episode)
         for tmpl_id in loaded - to_load:
             mngr_id = self._loaded_object_templates[tmpl_id]
             self._template_manager.remove_template_by_ID(mngr_id)
@@ -109,11 +114,11 @@ class SpawnedObjectNavTask(NavigationTask):
             self._loaded_object_templates[tmpl_id] = mngr_id
 
     def _despawn_objects(self) -> None:
-        for obj_id in self._sim.get_existing_object_ids():
-            self._sim.remove_object(obj_id)
+        for goal in self._current_episode.goals:
+            goal._despawn_from_sim(self._sim)
 
-    def _spawn_objects(self, episode: SpawnedObjectNavEpisode) -> None:
-        for goal in episode.goals:
+    def _spawn_objects(self) -> None:
+        for goal in self._current_episode.goals:
             mngr_id = self._loaded_object_templates[goal.object_template_id]
             goal._spawn_in_sim(self._sim, mngr_id)
 
@@ -128,9 +133,11 @@ class SpawnedObjectNavTask(NavigationTask):
         self._sim.recompute_navmesh(self._sim.pathfinder, settings, True)
 
     def reset(self, episode: SpawnedObjectNavEpisode) -> Observations:
-        self._despawn_objects()
-        self._reload_templates(episode)
-        self._spawn_objects(episode)
+        if self._current_episode is not None:
+            self._despawn_objects()
+        self._current_episode = episode
+        self._reload_templates()
+        self._spawn_objects()
         if self._config.ENABLE_OBJECT_COLLISIONS:
             self._recompute_navmesh_for_static_objects()
         return super().reset(episode)
