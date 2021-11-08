@@ -31,9 +31,16 @@ class SequentialObjectNavEpisode(SequentialEpisode):
 
 @registry.register_task(name="SequentialObjectNav-v0")
 class SequentialObjectNavTask(SpawnedObjectNavTask, SequentialNavigationTask):
-    def _spawn_objects(self, episode: SequentialObjectNavEpisode) -> None:
-        for step in episode.steps:
-            super()._spawn_objects(step)
+    def _spawn_objects(self) -> None:
+        for step in self._current_episode.steps:
+            for goal in step.goals:
+                mngr_id = self._loaded_object_templates[goal.object_template_id]
+                goal._spawn_in_sim(self._sim, mngr_id)
+
+    def _despawn_objects(self) -> None:
+        for step in self._current_episode.steps:
+            for goal in step.goals:
+                goal._despawn_from_sim(self._sim)
 
 
 SequentialObjectGoalCategorySensor = make_sequential(SpawnedObjectGoalCategorySensor,
