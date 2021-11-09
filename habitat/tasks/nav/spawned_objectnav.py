@@ -133,7 +133,8 @@ class SpawnedObjectNavTask(NavigationTask):
         self._sim.recompute_navmesh(self._sim.pathfinder, settings, True)
 
     def reset(self, episode: SpawnedObjectNavEpisode) -> Observations:
-        if self._current_episode is not None:
+        if self._current_episode is not None \
+                and self._current_episode.scene_id == episode.scene_id:
             self._despawn_objects()
         self._current_episode = episode
         self._reload_templates()
