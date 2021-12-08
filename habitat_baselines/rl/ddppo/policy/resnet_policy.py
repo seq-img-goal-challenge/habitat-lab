@@ -35,6 +35,8 @@ from habitat_baselines.rl.models.rnn_state_encoder import (
 )
 from habitat_baselines.rl.ppo import Net, Policy
 
+from habitat_baselines.rl.models.simple_cnn import SimpleCNN
+
 
 @baseline_registry.register_policy
 class PointNavResNetPolicy(Policy):
@@ -93,9 +95,12 @@ class ResNetEncoder(nn.Module):
         normalize_visual_inputs: bool = False,
     ):
         super().__init__()
-
         if "rgb" in observation_space.spaces:
-            h, w, c = observation_space.spaces["rgb"].shape
+            obs_shape = observation_space.spaces["rgb"].shape
+            if len(obs_shape) == 3:
+                h, w, c = obs_shape
+            elif len(obs_shape) == 4:
+                _, h, w, c = obs_shape
             self._n_input_rgb = c
             spatial_height = h // 2 # avg pool
             spatial_width = w // 2 # avg pool
@@ -103,7 +108,11 @@ class ResNetEncoder(nn.Module):
             self._n_input_rgb = 0
 
         if "depth" in observation_space.spaces:
-            h, w, c = observation_space.spaces["depth"].shape
+            obs_shape = observation_space.spaces["depth"].shape
+            if len(obs_shape) == 3:
+                h, w, c = obs_shape
+            elif len(obs_shape) == 4:
+                _, h, w, c = obs_shape
             self._n_input_depth = c
             if self._n_input_rgb > 0:
                 assert spatial_height == h // 2 and spatial_width == w // 2
@@ -306,6 +315,23 @@ class PointNavResNetNet(Net):
 
             rnn_input_size += hidden_size
 
+        if "appearance_rgb" in observation_space.spaces and "appearance_depth" in observation_space.spaces:
+            rnn_input_size += hidden_size
+
+        if "ego_map" in observation_space.spaces:
+            nb_values_ego_map = np.max(observation_space.spaces["ego_map"].high)
+            emb_dim_ego_map = 32
+            self.ego_map_embedding = nn.Embedding(nb_values_ego_map, emb_dim_ego_map)
+
+            h_ego_map, w_ego_map = observation_space.spaces["ego_map"].shape
+            output_size_encoder_ego_map = 512
+            obs_space_ego_map = spaces.Dict({"depth":spaces.Box(low=np.finfo(np.float32).min,
+                                                            high=np.finfo(np.float32).max,
+                                                            shape=(h_ego_map, w_ego_map, emb_dim_ego_map),
+                                                            dtype=np.float32)})
+            self.ego_map_encoder = SimpleCNN(observation_space=obs_space_ego_map, output_size=output_size_encoder_ego_map)
+            rnn_input_size += output_size_encoder_ego_map
+
         self._hidden_size = hidden_size
 
         self.visual_encoder = ResNetEncoder(
@@ -411,11 +437,11 @@ class PointNavResNetNet(Net):
             sensor_observations = observations[HeadingSensor.cls_uuid]
             sensor_observations = torch.stack(
                 [
-                    torch.cos(sensor_observations[0]),
-                    torch.sin(sensor_observations[0]),
+                    torch.cos(sensor_observations[:, 0]),
+                    torch.sin(sensor_observations[:, 0]),
                 ],
                 -1,
-            )
+            ).float()
             x.append(self.heading_embedding(sensor_observations))
 
         if ObjectGoalSensor.cls_uuid in observations:
@@ -444,6 +470,29 @@ class PointNavResNetNet(Net):
             goal_output = self.goal_visual_encoder({"rgb": goal_image})
             x.append(self.goal_visual_fc(goal_output))
 
+        if "appearance_rgb" in observations and "appearance_depth" in observations:
+            goal_images = observations["appearance_rgb"]
+            b, n_images, h, w, c = goal_images.shape
+            goal_images = goal_images.view(-1, h, w, c)
+
+            goal_depths = observations["appearance_depth"]
+            b, n_images_depth, h_depth, w_depth, c_depth = goal_depths.shape
+            goal_depths = goal_depths.view(-1, h_depth, w_depth, c_depth)
+
+            assert n_images == n_images_depth
+
+            goal_output = self.visual_encoder({"rgb": goal_images, "depth": goal_depths})
+            goal_output = self.visual_fc(goal_output)
+            goal_output = goal_output.view(b, n_images, -1)
+            goal_output = goal_output.sum(dim=1)
+            x.append(goal_output)
+
+        if "ego_map" in observations:
+            ego_map = observations["ego_map"].long()
+            embedded_ego_map = self.ego_map_embedding(ego_map)
+            ego_map_output = self.ego_map_encoder({"depth": embedded_ego_map})
+            x.append(ego_map_output)
+
         prev_actions = prev_actions.squeeze(-1)
         start_token = torch.zeros_like(prev_actions)
         prev_actions = self.prev_action_embedding(
@@ -451,7 +500,6 @@ class PointNavResNetNet(Net):
         )
 
         x.append(prev_actions)
-
         out = torch.cat(x, dim=1)
         out, rnn_hidden_states = self.state_encoder(
             out, rnn_hidden_states, masks
