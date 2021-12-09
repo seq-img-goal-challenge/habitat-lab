@@ -104,11 +104,9 @@ class SpawnedObjectNavTask(NavigationTask):
 
     def _preload_templates(self) -> None:
         tmpl_mngr = self._sim.get_object_template_manager()
-        print("\x1b[31m Before:", tmpl_mngr.get_file_template_handles(), "\x1b[0m")
         to_load = self._dataset.get_episode_iterator().get_object_subset()
         for tmpl_path in to_load:
             tmpl_mngr.load_configs(tmpl_path)
-        print("\x1b[32m After:", tmpl_mngr.get_file_template_handles(), "\x1b[0m")
 
     def _despawn_objects(self) -> None:
         for goal in self._current_episode.all_goals:
