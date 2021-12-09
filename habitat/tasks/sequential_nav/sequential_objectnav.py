@@ -34,8 +34,7 @@ class SequentialObjectNavTask(SpawnedObjectNavTask, SequentialNavigationTask):
     def _spawn_objects(self) -> None:
         for step in self._current_episode.steps:
             for goal in step.goals:
-                mngr_id = self._loaded_object_templates[goal.object_template_id]
-                goal._spawn_in_sim(self._sim, mngr_id)
+                goal._spawn_in_sim(self._sim)
 
     def _despawn_objects(self) -> None:
         for step in self._current_episode.steps:

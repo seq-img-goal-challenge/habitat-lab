@@ -315,6 +315,7 @@ def test_spawn_objects_fixed_rot():
         pytest.skip(f"Test objects '{OBJECTS_DIR}' not available.")
 
     with habitat.sims.make_sim(sim_cfg.TYPE, config=sim_cfg) as sim:
+        obj_mngr = sim.get_rigid_object_manager()
         sim.seed(123456)
         template_ids = [os.path.join(OBJECTS_DIR, tmpl, tmpl + OBJECT_EXT)
                         for tmpl in ("chair", "donut")]
@@ -322,6 +323,7 @@ def test_spawn_objects_fixed_rot():
         rng = np.random.default_rng(123456)
 
         goals = spawn_objects(sim, template_ids, positions, rng=rng)
+
         assert isinstance(goals, list)
         for goal, tmpl_id, pos in zip(goals, template_ids, positions):
             assert isinstance(goal, SpawnedObjectGoal)
@@ -330,11 +332,11 @@ def test_spawn_objects_fixed_rot():
             assert goal.object_template_id == tmpl_id
             assert goal.valid_view_points_indices == []
             assert goal.radius is None
-            assert goal._spawned_object_id is not None
+            assert goal._spawned_object is not None
 
-            assert sim.get_object_motion_type(goal._spawned_object_id) == MotionType.STATIC
+            assert goal._spawned_object.motion_type == MotionType.STATIC
 
-            node = sim.get_object_scene_node(goal._spawned_object_id)
+            node = goal._spawned_object.root_scene_node
             assert np.allclose(node.translation, pos - [0, node.cumulative_bb.bottom, 0])
             assert np.allclose([*node.rotation.vector, node.rotation.scalar], [0, 0, 0, 1])
 
@@ -366,7 +368,7 @@ def test_spawn_objects_vertical_rot():
             assert np.isclose(goal.rotation[2], 0)
             assert np.isclose(goal.rotation[1]**2 + goal.rotation[3]**2, 1)
 
-            node = sim.get_object_scene_node(goal._spawned_object_id)
+            node = goal._spawned_object.root_scene_node
             assert np.allclose(node.translation, np.array(goal.position) - [0, node.cumulative_bb.bottom, 0])
             assert np.allclose([*node.rotation.vector, node.rotation.scalar], goal.rotation)
 
@@ -396,7 +398,7 @@ def test_spawn_objects_free_rot():
         for goal in goals:
             assert np.isclose(np.linalg.norm(goal.rotation), 1)
 
-            node = sim.get_object_scene_node(goal._spawned_object_id)
+            node = goal._spawned_object.root_scene_node
             assert np.allclose(node.translation, np.array(goal.position) - [0, goal._rotated_bb[:, 1].min(), 0])
             assert np.allclose([*node.rotation.vector, node.rotation.scalar], goal.rotation)
 
@@ -433,8 +435,12 @@ def test_find_view_points():
 
     OBJECTS_DIR = "data/object_datasets/test_objects"
     OBJECT_EXT = ".object_config.json"
-    NUM_ANGLES = 20
-    NUM_RADII = 10
+
+    view_pts_cfg = habitat.Config()
+    view_pts_cfg.NUM_ANGLES = 20
+    view_pts_cfg.NUM_RADII = 10
+    view_pts_cfg.MIN_RADIUS = 0.5
+    view_pts_cfg.MAX_RADIUS = 3.5
 
     sim_cfg = habitat.get_config().SIMULATOR
     sim_cfg.defrost()
@@ -445,9 +451,9 @@ def test_find_view_points():
     if not os.path.isdir(OBJECTS_DIR):
         pytest.skip(f"Test objects '{OBJECTS_DIR}' not available.")
 
-    a = np.linspace(0, 2 * np.pi, NUM_ANGLES)
-    r = np.linspace(0.5, 3.5, NUM_RADII, endpoint=True)
-    rel_pos = np.zeros((NUM_ANGLES * NUM_RADII, 3), dtype=np.float32)
+    a = np.linspace(0, 2 * np.pi, view_pts_cfg.NUM_ANGLES)
+    r = np.linspace(0.5, 3.5, view_pts_cfg.NUM_RADII, endpoint=True)
+    rel_pos = np.zeros((view_pts_cfg.NUM_ANGLES * view_pts_cfg.NUM_RADII, 3), dtype=np.float32)
     rel_pos[:, 0] = np.outer(r, np.cos(a)).flatten()
     rel_pos[:, 2] = np.outer(r, np.sin(a)).flatten()
 
@@ -463,8 +469,7 @@ def test_find_view_points():
         recompute_navmesh_with_static_objects(sim)
         start_pos = sim.get_agent_state().position
 
-        goals = find_view_points(sim, src_goals, start_pos,
-                                 num_angles=NUM_ANGLES, num_radii=NUM_RADII)
+        goals = find_view_points(sim, src_goals, start_pos, view_pts_cfg)
         sensor_pos = np.array(sim.habitat_config.DEPTH_SENSOR.POSITION)
 
         assert isinstance(goals, list)
@@ -475,12 +480,12 @@ def test_find_view_points():
             assert np.allclose(goal.rotation, cp_goal.rotation)
             assert goal.object_template_id == cp_goal.object_template_id
             assert goal.radius is None
-            assert 0 < len(goal.valid_view_points_indices) <= NUM_RADII * NUM_ANGLES
+            assert 0 < len(goal.valid_view_points_indices) <= view_pts_cfg.NUM_RADII * view_pts_cfg.NUM_ANGLES
             for idx in goal.valid_view_points_indices:
                 ag_pos = np.array(goal.position) + rel_pos[idx]
                 assert sim.pathfinder.is_navigable(ag_pos)
                 assert np.isfinite(sim.geodesic_distance(start_pos, ag_pos))
-            assert all(iou > 0 for iou in goal.valid_view_points_iou)
+            assert all(iou > 0 for iou in goal.valid_view_points_ious)
 
 
 def test_generate_spawned_objectgoals():
@@ -502,9 +507,9 @@ def test_generate_spawned_objectgoals():
     if not os.path.isdir(OBJECTS_DIR):
         pytest.skip(f"Test objects '{OBJECTS_DIR}' not available.")
 
-    view_pts_cfg = cfg.DATASET.VIEW_POINTS
+    view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.VIEW_POINTS
     a = np.linspace(0, 2 * np.pi, view_pts_cfg.NUM_ANGLES)
-    r = np.linspace(0.5, 3.0, view_pts_cfg.NUM_RADII, endpoint=True)
+    r = np.linspace(view_pts_cfg.MIN_RADIUS, view_pts_cfg.MAX_RADIUS, view_pts_cfg.NUM_RADII, endpoint=True)
     n_pts = view_pts_cfg.NUM_ANGLES * view_pts_cfg.NUM_RADII
     rel_pos = np.zeros((n_pts, 3))
     rel_pos[:, 0] = np.outer(r, np.cos(a)).flatten()
@@ -525,13 +530,13 @@ def test_generate_spawned_objectgoals():
             assert isinstance(goal, SpawnedObjectGoal)
             assert goal.object_template_id == tmpl_id
             assert goal.radius is None
-            assert goal._spawned_object_id is not None
+            assert goal._spawned_object is not None
             assert 0 < len(goal.valid_view_points_indices) <= n_pts
             for idx in goal.valid_view_points_indices:
                 ag_pos = goal.position + rel_pos[idx]
                 assert sim.pathfinder.is_navigable(ag_pos)
                 assert np.isfinite(sim.geodesic_distance(start_pos, ag_pos))
-            assert all(iou > 0 for iou in goal.valid_view_points_iou)
+            assert all(iou > 0 for iou in goal.valid_view_points_ious)
 
 
 def test_generate_episode():
@@ -554,7 +559,7 @@ def test_generate_episode():
     if not os.path.isdir(OBJECTS_DIR):
         pytest.skip(f"Test objects '{OBJECTS_DIR}' not available.")
 
-    view_pts_cfg = cfg.DATASET.VIEW_POINTS
+    view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.VIEW_POINTS
 
     with habitat.sims.make_sim(sim_cfg.TYPE, config=sim_cfg) as sim:
         sim.seed(123456)
@@ -624,7 +629,7 @@ def test_generate_dataset():
             assert isinstance(goal, SpawnedObjectGoal)
             assert goal.object_template_id.endswith(OBJECT_EXT)
             assert os.path.isfile(goal.object_template_id)
-            assert goal._spawned_object_id is None
+            assert goal._spawned_object is None
             assert 0 < len(goal.valid_view_points_indices) <= 200
 
 

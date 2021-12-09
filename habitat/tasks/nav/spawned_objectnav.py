@@ -18,7 +18,7 @@ from habitat.datasets.spawned_objectnav.utils import get_uniform_view_pt_positio
                                                      get_view_pt_rotations, \
                                                      render_view_pts
 from habitat_sim.nav import NavMeshSettings
-from habitat_sim.physics import MotionType
+from habitat_sim.physics import MotionType, ManagedRigidObject
 from habitat_sim.attributes_managers import ObjectAttributesManager
 
 
@@ -31,7 +31,8 @@ class SpawnedObjectGoal(NavigationGoal):
     object_template_id: str
     valid_view_points_indices: np.ndarray = attr.ib(default=None, validator=not_none_validator)
     valid_view_points_ious: Optional[np.ndarray] = None
-    _spawned_object_id: Optional[int] = attr.ib(init=False, default=None)
+    _tmpl_id: Optional[int] = attr.ib(init=False, default=None)
+    _spawned_object: Optional[ManagedRigidObject] = attr.ib(init=False, default=None)
     _rotated_bb: Optional[np.ndarray] = attr.ib(init=False, default=None)
 
     def __getstate__(self):
@@ -42,24 +43,28 @@ class SpawnedObjectGoal(NavigationGoal):
         self._spawned_object_id = None
         self._rotated_bb = None
 
-    def _spawn_in_sim(self, sim: Simulator,
-                            mngr_id: Optional[str]=None) -> None:
-        if mngr_id is None:
-            mngr = sim.get_object_template_manager()
-            mngr_id, = mngr.load_configs(self.object_template_id)
-        self._spawned_object_id = sim.add_object(mngr_id)
-        node = sim.get_object_scene_node(self._spawned_object_id)
-        self._set_bb(node.cumulative_bb)
+    def _spawn_in_sim(self, sim: Simulator) -> None:
+        tmpl_mngr = sim.get_object_template_manager()
+        self._tmpl_id, = tmpl_mngr.load_configs(self.object_template_id)
+        obj_mngr = sim.get_rigid_object_manager()
+        self._spawned_object = obj_mngr.add_object_by_template_id(self._tmpl_id)
+        self._set_bb(self._spawned_object.root_scene_node.cumulative_bb)
         shift = -self._rotated_bb[:, 1].min()
-        sim.set_translation(self.position + np.array([0, shift, 0]), self._spawned_object_id)
-        sim.set_rotation(mn.Quaternion(self.rotation[:3], self.rotation[3]),
-                         self._spawned_object_id)
-        sim.set_object_motion_type(MotionType.STATIC, self._spawned_object_id)
+        self._spawned_object.translation = mn.Vector3(*self.position) + mn.Vector3(0, shift, 0)
+        self._spawned_object.rotation = mn.Quaternion(self.rotation[:3], self.rotation[3])
+        self._spawned_object.motion_type = MotionType.STATIC
 
     def _despawn_from_sim(self, sim: Simulator) -> None:
         self._rotated_bb = None
-        sim.remove_object(self._spawned_object_id)
-        self._spawned_object_id = None
+
+        obj_mngr = sim.get_rigid_object_manager()
+        obj_mngr.remove_object_by_id(self._spawned_object.object_id)
+        del self._spawned_object
+        self._spawned_object = None
+
+        tmpl_mngr = sim.get_object_template_manager()
+        tmpl_mngr.remove_template_by_id(self._tmpl_id)
+        self._tmpl_id = None
 
     def _set_bb(self, bb: mn.Range3D) -> None:
         rot = np.quaternion(self.rotation[3], *self.rotation[:3])
@@ -91,27 +96,8 @@ class SpawnedObjectNavEpisode(Episode):
 
 @registry.register_task(name="SpawnedObjectNav-v0")
 class SpawnedObjectNavTask(NavigationTask):
-    _template_manager: ObjectAttributesManager
-    _loaded_object_templates: Dict[str, int] # to avoid relying on tmpl_mngr object handles...
     _current_episode: Optional[SpawnedObjectNavEpisode] = None
     is_stop_called: bool = False
-
-    def __init__(self, config: Config, sim: Simulator,
-                 dataset: Optional["SpawnedObjectNavDatasetV1"]=None) -> None:
-        self._template_manager = sim.get_object_template_manager()
-        self._loaded_object_templates = {}
-        super().__init__(config=config, sim=sim, dataset=dataset)
-
-    def _reload_templates(self) -> None:
-        loaded = set(self._loaded_object_templates)
-        to_load = self._dataset.get_objects_to_load(self._current_episode)
-        for tmpl_id in loaded - to_load:
-            mngr_id = self._loaded_object_templates[tmpl_id]
-            self._template_manager.remove_template_by_ID(mngr_id)
-            del self._loaded_object_templates[tmpl_id]
-        for tmpl_id in to_load - loaded:
-            mngr_id, = self._template_manager.load_configs(tmpl_id)
-            self._loaded_object_templates[tmpl_id] = mngr_id
 
     def _despawn_objects(self) -> None:
         for goal in self._current_episode.goals:
@@ -119,8 +105,7 @@ class SpawnedObjectNavTask(NavigationTask):
 
     def _spawn_objects(self) -> None:
         for goal in self._current_episode.goals:
-            mngr_id = self._loaded_object_templates[goal.object_template_id]
-            goal._spawn_in_sim(self._sim, mngr_id)
+            goal._spawn_in_sim(self._sim)
 
     def _recompute_navmesh_for_static_objects(self):
         settings = NavMeshSettings()
@@ -137,7 +122,6 @@ class SpawnedObjectNavTask(NavigationTask):
                 and self._current_episode.scene_id == episode.scene_id:
             self._despawn_objects()
         self._current_episode = episode
-        self._reload_templates()
         self._spawn_objects()
         if self._config.ENABLE_OBJECT_COLLISIONS:
             self._recompute_navmesh_for_static_objects()
@@ -223,22 +207,21 @@ class SpawnedObjectGoalAppearanceSensor(Sensor):
                           dtype=src_space.dtype)
 
     def _move_object_out_of_context(self, goal: SpawnedObjectGoal):
-        self._sim.set_object_motion_type(MotionType.KINEMATIC, goal._spawned_object_id)
-        self._sim.set_translation(self._oob_pos, goal._spawned_object_id)
+        goal._spawned_object.motion_type = MotionType.KINEMATIC
+        goal._spawned_object.translation = self._oob_pos
 
         if self.config.RANDOM_OBJECT_ROTATION == "3D":
             ax = np.random.randn(3)
             ax /= np.linalg.norm(ax)
             a = 2 * np.pi * np.random.random()
             rot = mn.Quaternion.rotation(mn.Rad(a), mn.Vector3(*ax))
-            self._sim.set_rotation(rot, goal._spawned_object_id)
+            goal._spawned_object.rotation = rot
 
     def _restore_object_in_context(self, goal: SpawnedObjectGoal):
-        self._sim.set_translation(goal.position, goal._spawned_object_id)
+        goal._spawned_object.translation = goal.position
         if self.config.RANDOM_OBJECT_ROTATION == "3D":
-            self._sim.set_rotation(mn.Quaternion(goal.rotation[:3], goal.rotation[3]),
-                                   goal._spawned_object_id)
-        self._sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
+            goal._spawned_object.rotation = mn.Quaternion(goal.rotation[:3], goal.rotation[3])
+        goal._spawned_object.motion_type = MotionType.STATIC
 
     def _render_views_around_goal(self, goal: SpawnedObjectGoal, num_views: int) -> None:
         if self.config.OUT_OF_CONTEXT:

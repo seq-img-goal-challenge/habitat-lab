@@ -221,11 +221,11 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
         cand_rotations = abs_sensor_rotations[reachable]
         depth_with = render_view_pts(sim, cand_positions, cand_rotations)['depth']
 
-        sim.set_object_motion_type(MotionType.KINEMATIC, goal._spawned_object_id)
-        sim.set_translation([0.0, 2 * max_y, 0.0], goal._spawned_object_id)
+        goal._spawned_object.motion_type = MotionType.KINEMATIC
+        goal._spawned_object.translation = [0.0, 2 * max_y, 0.0]
         depth_without = render_view_pts(sim, cand_positions, cand_rotations)['depth']
-        sim.set_translation(goal.position, goal._spawned_object_id)
-        sim.set_object_motion_type(MotionType.STATIC, goal._spawned_object_id)
+        goal._spawned_object.translation = goal.position
+        goal._spawned_object.motion_type = MotionType.STATIC
 
         diff = (depth_with[..., 0] != depth_without[..., 0])
 
@@ -235,7 +235,7 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
 
         cand_indices, = np.nonzero(reachable)
         goal.valid_view_points_indices = cand_indices[visible].astype(np.uint8)
-        if not goal.valid_view_points_indices:
+        if not visible.any():
             raise UnreachableGoalError(goal, start_pos)
         goal.valid_view_points_ious = scores[visible].astype(np.float32)
     _logger.debug(f"All {len(goals)} goals have at least one view point.")
@@ -243,10 +243,9 @@ def find_view_points(sim: Simulator, goals: List[SpawnedObjectGoal], start_pos: 
 
 
 def clear_sim_from_objects(sim):
-    num_objects = 0
-    for obj_id in sim.get_existing_object_ids():
-        sim.remove_object(obj_id)
-        num_objects += 1
+    obj_mngr = sim.get_rigid_object_manager()
+    num_objects = obj_mngr.get_num_objects()
+    obj_mngr.remove_all_objects()
     sim.get_object_template_manager().remove_all_templates()
     _logger.debug(f"Cleared simulator from {num_objects} objects.")
 
