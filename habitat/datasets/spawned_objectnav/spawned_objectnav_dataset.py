@@ -1,9 +1,12 @@
 from typing import List, Dict, Set, Optional, Any
 import json
 import os.path
+import random
+import itertools
 
 import numpy as np
 
+from habitat.core.dataset import EpisodeIterator
 from habitat.core.registry import registry
 from habitat.config.default import Config
 from habitat.datasets.pointnav.pointnav_dataset import PointNavDatasetV1
@@ -13,6 +16,52 @@ from habitat.datasets.spawned_objectnav.utils import (find_scene_file,
                                                       strip_object_template_id)
 from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, SpawnedObjectNavEpisode
 
+
+class SpawnedObjectNavEpisodeIterator(EpisodeIterator):
+    group_by_object_subset: bool
+    object_subsets_size: int
+
+    def __init__(self, group_by_object_subset: bool=True, object_subsets_size: int=2000,
+                       *args: Any, **kwargs: Any) -> None:
+        self.group_by_object_subset = group_by_object_subset
+        self.object_subsets_size = object_subsets_size
+        super().__init__(*args, **kwargs)
+        if not self.group_by_scene and self.group_by_object_subset:
+            self.episodes = self._group_object_subsets(self.episodes)
+            self._iterator = iter(self.episodes)
+
+    def _group_scenes(self, episodes: List[SpawnedObjectNavEpisode]) \
+                     -> List[SpawnedObjectNavEpisode]:
+        if self.group_by_object_subset:
+            episodes = self._group_object_subsets(episodes)
+        return super()._group_scenes(episodes)
+
+    def _group_object_subsets(self, episodes: List[SpawnedObjectNavEpisode]) \
+                             -> List[SpawnedObjectNavEpisode]:
+        assert self.group_by_object_subset
+
+        objects = {goal.object_template_id for ep in episodes for goal in ep.all_goals}
+        objects = list(objects)
+        random.shuffle(objects)
+        object_subsets = [set(objects[b:b + self.object_subsets_size])
+                          for b in range(0, len(objects), self.object_subsets_size)]
+        subsets_map = {tmpl_id: subset_id for subset_id, subset in enumerate(object_subsets)
+                       for tmpl_id in subset}
+        return sorted(episodes, key=lambda ep: subsets_map[ep.goals[0].object_template_id])
+
+    def get_object_subset(self) -> Set[str]:
+        subset = set()
+        episodes = []
+        while len(subset) < self.object_subsets_size:
+            ep = next(self._iterator, None)
+            if ep is None:
+                break
+            subset |= {goal.object_template_id for goal in ep.all_goals}
+            episodes.append(ep)
+        self._iterator = itertools.chain(episodes, self._iterator)
+        return subset
+
+
 @registry.register_dataset(name="SpawnedObjectNav-v0")
 class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
     config: Config
@@ -21,17 +70,11 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
     _scn_ext: Optional[str] = None
     _obj_prefix: Optional[str] = None
     _obj_ext: Optional[str] = None
+    _ep_iter: Optional[SpawnedObjectNavEpisodeIterator] = None
 
     def __init__(self, config: Optional[Config]=None):
         self.config = config
         super().__init__(config=config)
-
-    def get_objects_to_load(self, episode: Optional[SpawnedObjectNavEpisode]=None) -> Set[str]:
-        if episode is None:
-            return {goal.object_template_id for episode in self.episodes
-                                            for goal in episode.goals}
-        else:
-            return {goal.object_template_id for goal in episode.goals}
 
     def get_object_category_map(self) -> Dict[str, int]:
         return {episode.object_category: episode.object_category_index
@@ -89,3 +132,10 @@ class SpawnedObjectNavDatasetV0(PointNavDatasetV1):
 
     def to_json(self) -> str:
         return json.dumps({"episodes": self.episodes}, default=self._json_default)
+
+    def get_episode_iterator(self, *args: Any, **kwargs: Any) \
+                            -> SpawnedObjectNavEpisodeIterator:
+        if self._ep_iter is None:
+            self._ep_iter = SpawnedObjectNavEpisodeIterator(episodes=self.episodes,
+                                                            *args, **kwargs)
+        return self._ep_iter

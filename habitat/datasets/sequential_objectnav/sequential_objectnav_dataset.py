@@ -16,16 +16,6 @@ from habitat.tasks.sequential_nav.sequential_objectnav import (SequentialObjectN
 class SequentialObjectNavDatasetV0(SpawnedObjectNavDatasetV0, SequentialDataset):
     episodes: List[SequentialObjectNavEpisode]
 
-    def get_objects_to_load(self, episode: Optional[SequentialObjectNavEpisode]=None) \
-                           -> Set[str]:
-        if episode is None:
-            return {goal.object_template_id for episode in self.episodes
-                                            for step in episode.steps
-                                            for goal in step.goals}
-        else:
-            return {goal.object_template_id for step in episode.steps
-                                            for goal in step.goals}
-
     def get_object_category_map(self) -> Dict[str, int]:
         return {step.object_category: step.object_category_index
                 for episode in self.episodes for step in episode.steps}

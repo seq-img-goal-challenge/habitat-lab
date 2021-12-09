@@ -31,7 +31,6 @@ class SpawnedObjectGoal(NavigationGoal):
     object_template_id: str
     valid_view_points_indices: np.ndarray = attr.ib(default=None, validator=not_none_validator)
     valid_view_points_ious: Optional[np.ndarray] = None
-    _tmpl_id: Optional[int] = attr.ib(init=False, default=None)
     _spawned_object: Optional[ManagedRigidObject] = attr.ib(init=False, default=None)
     _rotated_bb: Optional[np.ndarray] = attr.ib(init=False, default=None)
 
@@ -44,10 +43,8 @@ class SpawnedObjectGoal(NavigationGoal):
         self._rotated_bb = None
 
     def _spawn_in_sim(self, sim: Simulator) -> None:
-        tmpl_mngr = sim.get_object_template_manager()
-        self._tmpl_id, = tmpl_mngr.load_configs(self.object_template_id)
         obj_mngr = sim.get_rigid_object_manager()
-        self._spawned_object = obj_mngr.add_object_by_template_id(self._tmpl_id)
+        self._spawned_object = obj_mngr.add_object_by_template_handle(self.object_template_id)
         self._set_bb(self._spawned_object.root_scene_node.cumulative_bb)
         shift = -self._rotated_bb[:, 1].min()
         self._spawned_object.translation = mn.Vector3(*self.position) + mn.Vector3(0, shift, 0)
@@ -61,10 +58,6 @@ class SpawnedObjectGoal(NavigationGoal):
         obj_mngr.remove_object_by_id(self._spawned_object.object_id)
         del self._spawned_object
         self._spawned_object = None
-
-        tmpl_mngr = sim.get_object_template_manager()
-        tmpl_mngr.remove_template_by_id(self._tmpl_id)
-        self._tmpl_id = None
 
     def _set_bb(self, bb: mn.Range3D) -> None:
         rot = np.quaternion(self.rotation[3], *self.rotation[:3])
@@ -93,18 +86,36 @@ class SpawnedObjectNavEpisode(Episode):
     object_category_index: int
     goals: List[SpawnedObjectGoal] = attr.ib(default=None, validator=not_none_validator)
 
+    @property
+    def all_goals(self) -> List[SpawnedObjectGoal]:
+        return self.goals
+
 
 @registry.register_task(name="SpawnedObjectNav-v0")
 class SpawnedObjectNavTask(NavigationTask):
     _current_episode: Optional[SpawnedObjectNavEpisode] = None
     is_stop_called: bool = False
 
+    def _check_templates(self) -> bool:
+        tmpl_mngr = self._sim.get_object_template_manager()
+        loaded = set(tmpl_mngr.get_file_template_handles())
+        return all(goal.object_template_id in loaded
+                   for goal in self._current_episode.all_goals)
+
+    def _preload_templates(self) -> None:
+        tmpl_mngr = self._sim.get_object_template_manager()
+        print("\x1b[31m Before:", tmpl_mngr.get_file_template_handles(), "\x1b[0m")
+        to_load = self._dataset.get_episode_iterator().get_object_subset()
+        for tmpl_path in to_load:
+            tmpl_mngr.load_configs(tmpl_path)
+        print("\x1b[32m After:", tmpl_mngr.get_file_template_handles(), "\x1b[0m")
+
     def _despawn_objects(self) -> None:
-        for goal in self._current_episode.goals:
+        for goal in self._current_episode.all_goals:
             goal._despawn_from_sim(self._sim)
 
     def _spawn_objects(self) -> None:
-        for goal in self._current_episode.goals:
+        for goal in self._current_episode.all_goals:
             goal._spawn_in_sim(self._sim)
 
     def _recompute_navmesh_for_static_objects(self):
@@ -122,6 +133,8 @@ class SpawnedObjectNavTask(NavigationTask):
                 and self._current_episode.scene_id == episode.scene_id:
             self._despawn_objects()
         self._current_episode = episode
+        if not self._check_templates():
+            self._preload_templates()
         self._spawn_objects()
         if self._config.ENABLE_OBJECT_COLLISIONS:
             self._recompute_navmesh_for_static_objects()

@@ -29,8 +29,16 @@ class SequentialEpisode(Episode):
     _current_step_index: int = attr.ib(init=False, default=0)
 
     @property
-    def num_steps(self):
+    def num_steps(self) -> int:
         return len(self.steps)
+
+    @property
+    def goals(self) -> List[NavigationGoal]:
+        return self.steps[self._current_step_index].goals
+
+    @property
+    def all_goals(self) -> List[NavigationGoal]:
+        return sum((step.goals for step in self.steps), [])
 
     def __getstate__(self) -> Dict[str, Any]:
         return {k: v for k, v in vars(self).items() if not k.startswith('_')}
