@@ -52,7 +52,7 @@ class SpawnedObjectNavEpisodeIterator(EpisodeIterator):
                           for b in range(0, len(objects), self.object_subsets_size)]
         subsets_map = {tmpl_id: subset_id for subset_id, subset in enumerate(object_subsets)
                        for tmpl_id in subset}
-        return sorted(episodes, key=lambda ep: subsets_map[ep.goals[0].object_template_id])
+        return sorted(episodes, key=lambda ep: subsets_map[ep.all_goals[0].object_template_id])
 
     def get_object_subset(self) -> Set[str]:
         if self._current_episode is None:
