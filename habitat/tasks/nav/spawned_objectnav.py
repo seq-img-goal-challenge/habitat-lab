@@ -104,6 +104,7 @@ class SpawnedObjectNavTask(NavigationTask):
 
     def _preload_templates(self) -> None:
         tmpl_mngr = self._sim.get_object_template_manager()
+        tmpl_mngr.remove_all_templates()
         to_load = self._dataset.get_episode_iterator().get_object_subset()
         for tmpl_path in to_load:
             tmpl_mngr.load_configs(tmpl_path)
