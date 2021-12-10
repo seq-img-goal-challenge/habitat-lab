@@ -57,12 +57,14 @@ class SpawnedObjectNavEpisodeIterator(EpisodeIterator):
     def get_object_subset(self) -> Set[str]:
         if self._current_episode is None:
             subset = set()
+            scn_id = None
         else:
             subset = {goal.object_template_id for goal in self._current_episode.all_goals}
+            scn_id = self._current_episode.scene_id
         episodes = []
         while len(subset) < self.object_subsets_size:
             ep = next(self._iterator, None)
-            if ep is None:
+            if ep is None or (scn_id is not None and ep.scene_id != scn_id):
                 break
             subset |= {goal.object_template_id for goal in ep.all_goals}
             episodes.append(ep)
