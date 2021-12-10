@@ -33,7 +33,7 @@ class SequentialEpisode(Episode):
         return len(self.steps)
 
     @property
-    def goals(self) -> List[NavigationGoal]:
+    def current_goals(self) -> List[NavigationGoal]:
         return self.steps[self._current_step_index].goals
 
     @property

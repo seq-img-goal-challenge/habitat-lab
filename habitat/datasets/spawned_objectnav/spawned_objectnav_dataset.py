@@ -20,7 +20,7 @@ from habitat.tasks.nav.spawned_objectnav import SpawnedObjectGoal, SpawnedObject
 class SpawnedObjectNavEpisodeIterator(EpisodeIterator):
     group_by_object_subset: bool
     object_subsets_size: int
-    _current_episode: SpawnedObjectNavEpisode
+    _current_episode: Optional[SpawnedObjectNavEpisode] = None
 
     def __init__(self, group_by_object_subset: bool=True, object_subsets_size: int=2000,
                        *args: Any, **kwargs: Any) -> None:
@@ -55,7 +55,10 @@ class SpawnedObjectNavEpisodeIterator(EpisodeIterator):
         return sorted(episodes, key=lambda ep: subsets_map[ep.goals[0].object_template_id])
 
     def get_object_subset(self) -> Set[str]:
-        subset = {goal.object_template_id for goal in self._current_episode.all_goals}
+        if self._current_episode is None:
+            subset = set()
+        else:
+            subset = {goal.object_template_id for goal in self._current_episode.all_goals}
         episodes = []
         while len(subset) < self.object_subsets_size:
             ep = next(self._iterator, None)
