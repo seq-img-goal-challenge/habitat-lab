@@ -346,6 +346,8 @@ class EpisodeIterator(Iterator[T]):
         num_episode_sample: int = -1,
         step_repetition_range: float = 0.2,
         seed: int = None,
+        *args: Any,
+        **kwargs: Any,
     ) -> None:
         r"""..
 

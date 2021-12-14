@@ -558,6 +558,8 @@ _C.DATASET.DATA_PATH = (
 # SPAWNED OBJECTNAV DATASET
 # -----------------------------------------------------------------------------
 _C.DATASET.OBJECTS_DIR = "data/object_datasets"
+_C.ENVIRONMENT.ITERATOR_OPTIONS.GROUP_BY_OBJECT_SUBSET = True
+_C.ENVIRONMENT.ITERATOR_OPTIONS.OBJECT_SUBSETS_SIZE = 2000
 # -----------------------------------------------------------------------------
 
 
