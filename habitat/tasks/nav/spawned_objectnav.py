@@ -19,7 +19,6 @@ from habitat.datasets.spawned_objectnav.utils import get_uniform_view_pt_positio
                                                      render_view_pts
 from habitat_sim.nav import NavMeshSettings
 from habitat_sim.physics import MotionType, ManagedRigidObject
-from habitat_sim.attributes_managers import ObjectAttributesManager
 
 
 @attr.s(auto_attribs=True, kw_only=True)
