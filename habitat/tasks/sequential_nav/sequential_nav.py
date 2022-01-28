@@ -209,8 +209,11 @@ class SequentialEgoMapSensor(Sensor):
                 for goal in step.goals:
                     i, j = maps.to_grid(goal.position[2], goal.position[0],
                                         self._topdown_map.shape, self._sim)
-                    if t == episode._current_step_index:
+                    if self.config.DIFFERENTIATE_GOALS == "NEXT" \
+                            and t == episode._current_step_index:
                         indic = maps.MAP_NEXT_TARGET_POINT_INDICATOR
+                    elif self.config.DIFFERENTIATE_GOALS == "ALL":
+                        indic = maps.MAP_NEXT_TARGET_POINT_INDICATOR + t
                     else:
                         indic = maps.MAP_TARGET_POINT_INDICATOR
                     cv2.circle(self._topdown_map, (j, i), mrk, indic, -1)

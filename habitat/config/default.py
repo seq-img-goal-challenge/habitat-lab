@@ -281,6 +281,7 @@ _C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.MARKER_SIZE = 10
 _C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.FOG_OF_WAR = True
 _C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.HFOV = 56
 _C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.VISIBILITY = 2.0
+_C.TASK.SEQUENTIAL_EGO_MAP_SENSOR.DIFFERENTIATE_GOALS = "DISABLE"
 # -----------------------------------------------------------------------------
 # SEQUENTIAL TOP DOWN MAP MEASUREMENT
 # -----------------------------------------------------------------------------
