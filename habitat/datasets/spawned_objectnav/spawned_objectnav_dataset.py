@@ -64,10 +64,12 @@ class SpawnedObjectNavEpisodeIterator(EpisodeIterator):
         episodes = []
         while len(subset) < self.object_subsets_size:
             ep = next(self._iterator, None)
-            if ep is None or (scn_id is not None and ep.scene_id != scn_id):
+            if ep is None: 
+                break
+            episodes.append(ep)
+            if scn_id is not None and ep.scene_id != scn_id:
                 break
             subset |= {goal.object_template_id for goal in ep.all_goals}
-            episodes.append(ep)
         self._iterator = itertools.chain(episodes, self._iterator)
         return subset
 
