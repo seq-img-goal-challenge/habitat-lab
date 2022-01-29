@@ -13,7 +13,7 @@ from habitat.config.default import Config
 from habitat.core.simulator import Simulator
 from habitat.datasets.spawned_objectnav.spawned_objectnav_generator import (
     DEFAULT_SCENE_PATH_EXT, ObjectPoolCategory, ObjectRotation, ExistBehavior, \
-    UnreachableGoalError, MaxRetriesError, create_object_pool, create_scene_pool,
+    UnreachableGoalError, MaxRetriesError, create_object_pool_v2, create_scene_pool,
     generate_spawned_objectgoals, check_existence
 )
 from habitat.datasets.sequential_objectnav.sequential_objectnav_dataset \
@@ -95,7 +95,7 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
     rng = np.random.default_rng(seed)
     scene_pool = create_scene_pool(scenes_dir)
     rng.shuffle(scene_pool)
-    object_pool = create_object_pool(objects_dir)
+    object_pool = create_object_pool_v2(objects_dir)
     rng.shuffle(object_pool)
     view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.VIEW_POINTS
     if view_pts_cfg.NUM_ANGLES * view_pts_cfg.NUM_RADII > 256:

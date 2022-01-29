@@ -1,8 +1,6 @@
 ENVIRONMENT:
   ITERATOR_OPTIONS:
     MAX_SCENE_REPEAT_EPISODES: 3000
-    # WARNING: Never go above 4000!
-    # The 3d models are never unloaded unless you close the simulator
 SIMULATOR:
   AGENT_0:
     SENSORS: ["RGB_SENSOR", "DEPTH_SENSOR"]
