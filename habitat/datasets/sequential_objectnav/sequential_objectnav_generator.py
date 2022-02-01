@@ -97,7 +97,7 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
     rng.shuffle(scene_pool)
     object_pool = create_object_pool_v2(objects_dir)
     rng.shuffle(object_pool)
-    view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.VIEW_POINTS
+    view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE_SENSOR.VIEW_POINTS
     if view_pts_cfg.NUM_ANGLES * view_pts_cfg.NUM_RADII > 256:
         raise ValueError("Too many potential view points around a single goal (max = 256); "
                          "please update your view points config")
@@ -115,6 +115,9 @@ def generate_sequential_objectnav_dataset(cfg: Config, scenes_dir: str, objects_
                 if seed is not None:
                     sim.seed(seed + k)
                 idx = 0
+                sim.get_object_template_manager().load_configs(
+                    os.path.join(objects_dir, ".configs")
+                )
                 for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                     try:
                         episode = generate_sequential_objectnav_episode(

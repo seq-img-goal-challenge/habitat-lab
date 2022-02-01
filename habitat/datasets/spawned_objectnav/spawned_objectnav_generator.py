@@ -257,7 +257,7 @@ def clear_sim_from_objects(sim):
     obj_mngr = sim.get_rigid_object_manager()
     num_objects = obj_mngr.get_num_objects()
     obj_mngr.remove_all_objects()
-    sim.get_object_template_manager().remove_all_templates()
+    # sim.get_object_template_manager().remove_all_templates()
     _logger.debug(f"Cleared simulator from {num_objects} objects.")
 
 
@@ -350,7 +350,7 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
     rng.shuffle(scene_pool)
     object_pool = create_object_pool(objects_dir)
     rng.shuffle(object_pool)
-    view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE.VIEW_POINTS
+    view_pts_cfg = cfg.TASK.SPAWNED_OBJECTGOAL_APPEARANCE_SENSOR.VIEW_POINTS
     if view_pts_cfg.NUM_ANGLES * view_pts_cfg.NUM_RADII > 256:
         raise ValueError("Too many potential view points around a single goal (max = 256); "
                          "please update your view points config")
@@ -368,6 +368,9 @@ def generate_spawned_objectnav_dataset(cfg: Config, scenes_dir: str, objects_dir
                 if seed is not None:
                     sim.seed(seed + k)
                 idx = 0
+                sim.get_object_template_manager().load_configs(
+                    os.path.join(objects_dir, ".configs")
+                )
                 for _ in range(num_ep_per_scene + (1 if k < more_ep else 0)):
                     try:
                         episode = generate_spawned_objectnav_episode(
