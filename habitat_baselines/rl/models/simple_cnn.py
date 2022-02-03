@@ -61,7 +61,7 @@ class SimpleCNN(nn.Module):
                     stride=np.array(stride, dtype=np.float32),
                 )
 
-            self.cnn = nn.Sequential(
+            layers = [
                 nn.Conv2d(
                     in_channels=self._n_input_rgb + self._n_input_depth,
                     out_channels=32,
@@ -82,11 +82,14 @@ class SimpleCNN(nn.Module):
                     kernel_size=self._cnn_layers_kernel_size[2],
                     stride=self._cnn_layers_stride[2],
                 ),
-                #  nn.ReLU(True),
-                nn.Flatten(),
-                nn.Linear(32 * cnn_dims[0] * cnn_dims[1], output_size),
-                nn.ReLU(True),
-            )
+            ]
+            if output_size > 0:
+                layers.extend([
+                    nn.Flatten(),
+                    nn.Linear(32 * cnn_dims[0] * cnn_dims[1], output_size),
+                ])
+            layers.append(nn.ReLU(True))
+            self.cnn = nn.Sequential(*layers)
 
         self.layer_init()
 
