@@ -65,7 +65,7 @@ def _ego_to_episodic_coords(
 
 
 class EgoMapCoordinatesGrid(nn.Module):
-    r"""Module to compute episodic (x=right, z=back) coordinates
+    r"""Module to compute episodic (x=forward, y=right) coordinates
     corresponding to every pixels of the ego map
     """
 
@@ -115,7 +115,8 @@ class EgoMapCoordinatesGrid(nn.Module):
             given at the initialization of the module
         :rtype: torch.FloatTensor
         """
-        return _ego_to_episodic_coords(observations, self.grid)
+        grid = self.grid.expand(observations["depth"].size(0), -1, -1, -1, -1)
+        return _ego_to_episodic_coords(observations, grid)
 
 
 class InverseCameraModel(nn.Module):
