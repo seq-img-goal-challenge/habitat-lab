@@ -235,6 +235,11 @@ _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE_SENSOR.VIEW_POINTS.NUM_RADII = 10
 _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE_SENSOR.VIEW_POINTS.MIN_RADIUS = 0.5
 _C.TASK.SPAWNED_OBJECTGOAL_APPEARANCE_SENSOR.VIEW_POINTS.MAX_RADIUS = 3.5
 # -----------------------------------------------------------------------------
+# OBJECT DETECTOR SENSOR
+# -----------------------------------------------------------------------------
+_C.TASK.OBJECT_DETECTOR_SENSOR = CN()
+_C.TASK.OBJECT_DETECTOR_SENSOR.TYPE = "ObjectDetectorSensor"
+# -----------------------------------------------------------------------------
 # DISTANCE TO OBJECT MEASURE
 # -----------------------------------------------------------------------------
 _C.TASK.DISTANCE_TO_OBJECT = CN()

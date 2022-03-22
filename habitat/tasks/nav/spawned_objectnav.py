@@ -140,6 +140,53 @@ class SpawnedObjectNavTask(NavigationTask):
 
 
 @registry.register_sensor
+class ObjectDetectorSensor(Sensor):
+    _sim: Simulator
+    _shape: Tuple[int, int]
+    _oob_pos: mn.Vector3
+
+    def __init__(self, sim: Simulator, *args: Any, **kwargs: Any) -> None:
+        self._sim = sim
+        self._shape = (
+            sim.habitat_config.DEPTH_SENSOR.HEIGHT,
+            sim.habitat_config.DEPTH_SENSOR.WIDTH,
+            1
+        )
+        _, (_, maxy, _) = sim.pathfinder.get_bounds()
+        self_oob_pos = mn.Vector3(0.0, 2 * maxy, 0.0)
+        super().__init__(sim = sim, *args, **kwargs)
+
+    def _get_uuid(self, *args: Any, **kwargs: Any) -> str:
+        return "object_detector"
+
+    def _get_sensor_type(self, *args: Any, **kwargs: Any) -> SensorTypes:
+        return SensorTypes.SEMANTIC
+
+    def _get_observation_space(self, *args: Any, **kwargs: Any) -> gym.Space:
+        return gym.spaces.Box(0, 1, self._shape, np.float32)
+
+    def get_observation(self,
+        observations: Observations, episode: Episode, *args: Any, **kwargs: Any
+    ) -> VisualObservation:
+        depth_with = observations["depth"]
+#        obj_mngr = self._sim.get_rigid_object_manager()
+#        objects = [
+#            obj_mngr.get_object_by_handle(hdl)
+#            for hdl in obj_mngr.get_object_handles()
+#        ]
+        objects = [goal._spawned_object for goal in episode.all_goals]
+        prv_pos = [obj.translation for obj in objects]
+        for obj in objects:
+            obj.motion_type = MotionType.KINEMATIC
+            obj.translation = self._oob_pos
+        depth_without = self._sim.get_observations_at()["depth"]
+        for obj, pos in zip(objects, prv_pos):
+            obj.translation = pos
+            obj.motion_type = MotionType.STATIC
+        return (depth_with != depth_without).astype(np.float32)
+
+
+@registry.register_sensor
 class SpawnedObjectGoalCategorySensor(Sensor):
     _max_object_category_index: int
 
