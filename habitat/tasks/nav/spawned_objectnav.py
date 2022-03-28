@@ -1,4 +1,4 @@
-from typing import List, Dict, Any, Optional
+from typing import Tuple, List, Dict, Any, Optional
 import attr
 
 import numpy as np
@@ -162,8 +162,8 @@ class ObjectDetectorSensor(Sensor):
     def _get_sensor_type(self, *args: Any, **kwargs: Any) -> SensorTypes:
         return SensorTypes.SEMANTIC
 
-    def _get_observation_space(self, *args: Any, **kwargs: Any) -> gym.Space:
-        return gym.spaces.Box(0, 1, self._shape, np.float32)
+    def _get_observation_space(self, *args: Any, **kwargs: Any) -> Space:
+        return spaces.Box(0, 1, self._shape, np.float32)
 
     def get_observation(self,
         observations: Observations, episode: Episode, *args: Any, **kwargs: Any
