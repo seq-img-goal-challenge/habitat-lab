@@ -125,7 +125,7 @@ def create_object_pool_v2(objects_dir: str) -> List[ObjectPoolCategory]:
     configs = sorted(entry.path for entry in os.scandir(os.path.join(objects_dir, ".configs"))
                      if entry.name.endswith(DEFAULT_OBJECT_PATH_EXT))
     def cat_name(cfg_path: str) -> str:
-        return os.path.basename(cfg_path).split('_')[0]
+        return os.path.basename(cfg_path)[:-len(DEFAULT_OBJECT_PATH_EXT)].rsplit('_', 1)[0]
     pool = sorted(ObjectPoolCategory(k, i, sorted(g))
                   for i, (k, g) in enumerate(itertools.groupby(configs, key=cat_name)))
     _logger.debug(f"Created pool of {len(pool)} object categories.")
