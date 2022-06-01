@@ -41,7 +41,7 @@ def _ego_to_episodic_coords(
             torch.cat((cosa, -sina), 2),
             torch.cat((sina, cosa), 2),
         ), 1)
-    else:
+    elif dim == 3:
         zeros = torch.zeros_like(a)
         ones = torch.ones_like(a)
         rot = torch.cat((
@@ -49,6 +49,8 @@ def _ego_to_episodic_coords(
             torch.cat((zeros, ones, zeros), 2),
             torch.cat((-sina, zeros, cosa), 2),
         ), 1)
+    else:
+        raise RuntimeError(f"Unexpected dimension {dim} of ego coordinates")
     rot = rot.view(batch_size, *(1 for _ in size), dim, dim)
     episodic_coords = torch.matmul(rot, ego_coords.unsqueeze(-1)).squeeze(-1)
 
@@ -91,7 +93,7 @@ class EgoMapCoordinatesGrid(nn.Module):
             out_size = ego_map_size
         dim = torch.linspace(-bound, bound, out_size)
         grid = torch.stack(torch.meshgrid(-dim, dim, indexing='ij'), -1)
-        self.register_buffer("grid", grid.view(1, out_size, out_size, 2, 1), False)
+        self.register_buffer("grid", grid.view(1, out_size, out_size, 2), False)
 
     def forward(self, observations: TensorDict) -> torch.FloatTensor:
         r"""Computes the coordinates grid centered and rotated
@@ -115,7 +117,7 @@ class EgoMapCoordinatesGrid(nn.Module):
             given at the initialization of the module
         :rtype: torch.FloatTensor
         """
-        grid = self.grid.expand(observations["depth"].size(0), -1, -1, -1, -1)
+        grid = self.grid.expand(observations["depth"].size(0), -1, -1, -1)
         return _ego_to_episodic_coords(observations, grid)
 
 
