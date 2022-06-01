@@ -38,8 +38,8 @@ def _ego_to_episodic_coords(
     sina = torch.sin(a)
     if dim == 2:
         rot = torch.cat((
-            torch.cat((cosa, -sina), 2),
-            torch.cat((sina, cosa), 2),
+            torch.cat((cosa, sina), 2),
+            torch.cat((-sina, cosa), 2),
         ), 1)
     elif dim == 3:
         zeros = torch.zeros_like(a)
@@ -117,7 +117,7 @@ class EgoMapCoordinatesGrid(nn.Module):
             given at the initialization of the module
         :rtype: torch.FloatTensor
         """
-        grid = self.grid.expand(observations["depth"].size(0), -1, -1, -1)
+        grid = self.grid.expand(observations["gps"].size(0), -1, -1, -1)
         return _ego_to_episodic_coords(observations, grid)
 
 
