@@ -69,7 +69,10 @@ class SpawnedObjectGoal(NavigationGoal):
 
     @property
     def pathfinder_targets(self) -> List[List[float]]:
-        return (self.position + self._rotated_bb).tolist()
+        return (
+            [self.position] if self._rotated_bb is None
+            else (self.position + self._rotated_bb).tolist()
+        )
 
 
 @attr.s(auto_attribs=True, kw_only=True)
