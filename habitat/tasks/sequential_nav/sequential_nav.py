@@ -199,7 +199,10 @@ class SequentialEgoMapSensor(Sensor):
                               *args: Any, **kwargs: Any) -> np.ndarray:
         mrk = self.config.MARKER_SIZE // 2
         mppx = self.config.METERS_PER_PIXEL
-        if self._last_ep_id != episode.episode_id:
+        is_ros = self._sim.habitat_config.TYPE == "ROS-Robot-v0"
+        if is_ros:
+            self._topdown_map = maps.get_topdown_map_from_sim(self._sim, meters_per_pixel=mppx)
+        elif self._last_ep_id != episode.episode_id:
             self._topdown_map = maps.get_topdown_map_from_sim(self._sim, meters_per_pixel=mppx)
             self._fog = np.zeros_like(self._topdown_map)
 
@@ -225,7 +228,7 @@ class SequentialEgoMapSensor(Sensor):
         a = 2 * np.arctan(s.rotation.y / s.rotation.w)
         d = self.config.VISIBILITY
         topdown_map = self._topdown_map.copy()
-        if self.config.FOG_OF_WAR:
+        if not is_ros and self.config.FOG_OF_WAR:
             fov = self.config.HFOV
             self._fog = fog_of_war.reveal_fog_of_war(self._topdown_map, self._fog,
                                                      np.array((i, j)), np.pi + a,
